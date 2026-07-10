@@ -198,12 +198,16 @@ final class PhoneController: NSObject, ObservableObject {
         registerCommand(commandCenter.seekBackwardCommand, named: "seekBackwardCommand")
     }
 
+    func sendCommand(_ commandName: String) {
+        appendLog(commandName)
+        relayClient.send(["type": "command", "command": commandName])
+    }
+
     private func registerCommand(_ command: MPRemoteCommand, named commandName: String) {
         command.isEnabled = true
         command.addTarget { [weak self] _ in
             DispatchQueue.main.async {
-                self?.appendLog(commandName)
-                self?.relayClient.send(["type": "command", "command": commandName])
+                self?.sendCommand(commandName)
             }
             return .success
         }
