@@ -112,6 +112,10 @@ final class PhoneController: NSObject, ObservableObject {
             microphoneGate.phoneOwnsAudio = owner == "phone"
             microphoneGate.recording = recording
             refreshActivityStatus()
+        case "activity":
+            if let text = payload["text"] as? String {
+                appendLog("claude: \(text)")
+            }
         case "sound":
             if let soundName = payload["name"] as? String {
                 soundPlayer.play(soundName)

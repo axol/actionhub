@@ -37,6 +37,7 @@ Hub → phone:
   every state change and on connect; the phone streams real mic audio only while it owns audio
   and `recording` is true, and shuts its Scribe connection down entirely while the Mac owns audio
 - `{"type": "sound", "name": "click" | "sent" | "delivered" | "record" | "stop" | "tick" | "think" | "response"}` — earcons; phone plays its bundled copy, unknown names are ignored
+- `{"type": "activity", "kind": "tool_use" | "thinking" | "response", "text": "..."}` — raw Claude session events from the transcript observer, for on-screen display
 - `{"type": "speak", "text": "..."}` — phone fetches TTS from ElevenLabs and plays it
 - `{"type": "stop_playback"}` — abort phone-side TTS immediately
 - `{"type": "commit"}` — force a Scribe commit (drain before send)

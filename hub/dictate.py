@@ -421,6 +421,7 @@ async def observe_transcript():
             event_kind, event_description = classified_event
             clear_live_partial()
             print(f"[claude] {event_description}", file=sys.stderr)
+            send_phone_message({"type": "activity", "kind": event_kind, "text": event_description})
             if event_kind == "response":
                 play_sound(RESPONSE_SOUND)
                 continue
