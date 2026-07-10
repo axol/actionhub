@@ -1,6 +1,7 @@
 import asyncio
 import atexit
 import base64
+import datetime
 import difflib
 import json
 import os
@@ -86,6 +87,7 @@ status_bar_state = {
 
 audio_state = {"owner": "phone"}
 phone_link = {"connection": None}
+observed_lock = {"fingerprint": None, "fingerprint_time": 0.0, "hint_printed": False}
 
 
 def normalize_utterance(text):
@@ -199,6 +201,8 @@ def deliver_message(message_text):
     with open(temporary_path, "w") as message_file:
         message_file.write(message_text)
     os.rename(temporary_path, final_path)
+    observed_lock["fingerprint"] = message_text[:80]
+    observed_lock["fingerprint_time"] = time.time()
     print(f"[delivered to claude pid {session_entry['claudeProcessId']}]", file=sys.stderr)
     return True
 
@@ -353,16 +357,49 @@ def munge_project_path(project_path):
     return re.sub(r"[^A-Za-z0-9]", "-", project_path)
 
 
-def newest_transcript_path(working_directory):
+def session_transcript_candidates(working_directory):
     transcript_directory = os.path.join(CLAUDE_PROJECTS_DIRECTORY, munge_project_path(working_directory))
     if not os.path.isdir(transcript_directory):
-        return None
-    transcript_paths = [
+        return []
+    return [
         os.path.join(transcript_directory, file_name)
         for file_name in os.listdir(transcript_directory)
         if file_name.endswith(".jsonl")
     ]
-    return max(transcript_paths, key=os.path.getmtime, default=None)
+
+
+def parse_started_at(started_at_text):
+    try:
+        return datetime.datetime.fromisoformat(started_at_text.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return 0.0
+
+
+def locate_session_transcript(session_entry):
+    candidate_paths = session_transcript_candidates(session_entry["workingDirectory"])
+    session_start = parse_started_at(session_entry["startedAt"])
+    for candidate_path in candidate_paths:
+        try:
+            birth_time = os.stat(candidate_path).st_birthtime
+        except OSError:
+            continue
+        if abs(birth_time - session_start) < 15:
+            return candidate_path
+    fingerprint = observed_lock["fingerprint"]
+    if not fingerprint:
+        return None
+    for candidate_path in candidate_paths:
+        try:
+            if os.path.getmtime(candidate_path) < observed_lock["fingerprint_time"] - 5:
+                continue
+            with open(candidate_path, "rb") as transcript_file:
+                transcript_file.seek(max(0, os.path.getsize(candidate_path) - 262144))
+                tail_text = transcript_file.read().decode("utf-8", errors="ignore")
+        except OSError:
+            continue
+        if fingerprint in tail_text:
+            return candidate_path
+    return None
 
 
 def classify_transcript_line(line):
@@ -394,8 +431,11 @@ async def observe_transcript():
         session_entry = find_live_voice_session()
         if session_entry is None:
             continue
-        current_path = newest_transcript_path(session_entry["workingDirectory"])
+        current_path = locate_session_transcript(session_entry)
         if current_path is None:
+            if not observed_lock["hint_printed"]:
+                observed_lock["hint_printed"] = True
+                print("[transcript not locked, send a message to calibrate]", file=sys.stderr)
             continue
         if current_path != transcript_path:
             if transcript_file:
@@ -404,6 +444,7 @@ async def observe_transcript():
             transcript_file.seek(0, os.SEEK_END)
             transcript_path = current_path
             pending_text = ""
+            observed_lock["hint_printed"] = False
             print(f"[observing transcript] {transcript_path}", file=sys.stderr)
         chunk = transcript_file.read()
         if not chunk:
