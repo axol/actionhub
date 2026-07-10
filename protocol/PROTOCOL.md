@@ -2,29 +2,41 @@
 
 ## Transport
 
-Cloudflare Worker + Durable Object at `relay.babelbase.com`. One Durable Object per `room`.
-Connections declare `role` (`phone` or `mac`) and `room` via query params. The relay broadcasts
-each message to all sockets of the opposite role in the same room. It answers `ping` with `pong`
-and understands nothing else.
+Cloudflare Worker + Durable Object at `relay.babelbase.com`. One Durable Object per `room`;
+everything uses room `hub`. Connections declare `role` (`phone` or `mac`) via query params.
+The relay broadcasts each message to all sockets of the opposite role in the same room.
+It answers a literal `ping` with `pong` and understands nothing else.
 
-Rooms in use:
+## Audio ownership
 
-- `car` — legacy car remote: raw `{"command": "<MPRemoteCommandName>"}` events, phone → mac only
-- `walk` — walk mode, bidirectional, message vocabulary below
+The hub owns one state machine (buffer, recording, pending send). Exactly one device owns
+audio at a time — mic, TTS playback, and earcons all follow the owner:
 
-## Walk mode messages (milestone 1, plaintext JSON)
+- `phone` (default): push-to-talk via the phone's media buttons; phone mic streams to Scribe,
+  TTS and earcons play on the phone (headphones, car audio, wherever the phone is routed).
+- `mac`: always-listening VAD on the Mac mic; send by phrase or right arrow, discard by left
+  arrow; TTS and earcons on the Mac. No push-to-talk on the Mac.
+
+Ownership follows deliberate input: any media command from the phone takes audio for the
+phone (so a button press mid-walk both takes over and starts recording); `v` on the hub
+keyboard toggles between mac and phone. Nothing is inferred from presence or location.
+
+## Messages
 
 Phone → hub:
 
-- `{"type": "hello", "device": "<name>"}` — sent on connect
-- `{"type": "command", "command": "nextTrackCommand" | "previousTrackCommand" | ...}` — headphone buttons
+- `{"type": "hello", "device": "<name>"}` — on connect
+- `{"type": "presence"}` — every 10s; keepalive and presence dot, nothing else
+- `{"type": "command", "command": "nextTrackCommand" | "previousTrackCommand" | ...}` — media buttons, exact MPRemoteCommand names
 - `{"type": "utterance", "kind": "partial" | "committed", "text": "..."}` — on-phone Scribe output
 - `{"type": "playback", "active": true | false}` — phone-side TTS playback state
 
 Hub → phone:
 
-- `{"type": "state", "recording": bool, "pending_send": bool, "vad": bool}` — after every state change and on connect; the phone streams real microphone audio only while `recording` is true, silence otherwise
-- `{"type": "sound", "name": "click" | "sent" | "delivered" | "record" | "stop" | "tick" | "think" | "response"}` — earcon mirroring; phone plays its bundled copy, unknown names are ignored
+- `{"type": "state", "recording": bool, "pending_send": bool, "audio": "phone" | "mac"}` — after
+  every state change and on connect; the phone streams real mic audio only while it owns audio
+  and `recording` is true, and shuts its Scribe connection down entirely while the Mac owns audio
+- `{"type": "sound", "name": "click" | "sent" | "delivered" | "record" | "stop" | "tick" | "think" | "response"}` — earcons; phone plays its bundled copy, unknown names are ignored
 - `{"type": "speak", "text": "..."}` — phone fetches TTS from ElevenLabs and plays it
 - `{"type": "stop_playback"}` — abort phone-side TTS immediately
 - `{"type": "commit"}` — force a Scribe commit (drain before send)
@@ -38,7 +50,7 @@ Ported from ActionHub legacy iOS (libsodium):
 - Pairing: devices exchange Ed25519 public keys via QR scan in person. Each peer record carries a
   role: `controller` (phone) or `viewer` (Daylight). The hub enforces roles, never the client.
 - Wire format: `sealed_box(recipient_x25519, json({version, sender_public_key, signature, payload}))`
-  where `signature = ed25519_sign(sender, payload)` and payload is the milestone-1 JSON.
+  where `signature = ed25519_sign(sender, payload)` and payload is the plaintext JSON above.
 - Receivers drop messages from unknown senders before parsing the payload.
 - The relay token remains as a spam guard only; confidentiality and authenticity come from the
   envelope. Replay protection: monotonic counter per sender inside the payload, receivers reject

@@ -6,12 +6,12 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
     var onStatusChange: ((String) -> Void)?
 
     private var webSocketTask: URLSessionWebSocketTask?
-    private var pingTimer: Timer?
+    private var presenceTimer: Timer?
     private lazy var urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: .main)
 
     func connect() {
         guard webSocketTask == nil else { return }
-        guard let relayUrl = URL(string: "wss://relay.babelbase.com/?role=phone&room=walk&token=\(relayToken)") else { return }
+        guard let relayUrl = URL(string: "wss://relay.babelbase.com/?role=phone&room=hub&token=\(relayToken)") else { return }
         let task = urlSession.webSocketTask(with: relayUrl)
         webSocketTask = task
         onStatusChange?("relay: connecting...")
@@ -28,7 +28,7 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocolName: String?) {
         onStatusChange?("relay: connected")
-        startPinging()
+        startPresence()
         onOpen?()
     }
 
@@ -56,8 +56,8 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
         DispatchQueue.main.async {
             guard self.webSocketTask != nil else { return }
             self.onStatusChange?("relay: disconnected, retrying...")
-            self.pingTimer?.invalidate()
-            self.pingTimer = nil
+            self.presenceTimer?.invalidate()
+            self.presenceTimer = nil
             self.webSocketTask?.cancel()
             self.webSocketTask = nil
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
@@ -66,10 +66,10 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
-    private func startPinging() {
-        pingTimer?.invalidate()
-        pingTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            self?.webSocketTask?.send(.string("ping")) { _ in }
+    private func startPresence() {
+        presenceTimer?.invalidate()
+        presenceTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.send(["type": "presence"])
         }
     }
 }

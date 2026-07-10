@@ -4,20 +4,18 @@ import SwiftUI
 import UIKit
 
 final class MicrophoneGate {
-    var enabled = true
+    var phoneOwnsAudio = true
     var recording = false
     var speaking = false
 }
 
 @MainActor
-final class WalkController: NSObject, ObservableObject {
+final class PhoneController: NSObject, ObservableObject {
     @Published var relayStatus = "relay: connecting..."
     @Published var scribeStatus = "scribe: off"
     @Published var activityStatus = "idle"
+    @Published var audioOwner = "phone"
     @Published var eventLog: [String] = []
-    @Published var walkAudioEnabled = true {
-        didSet { applyWalkAudioSetting() }
-    }
 
     private let relayClient = RelayClient()
     private let scribeStream = ScribeStream()
@@ -46,7 +44,7 @@ final class WalkController: NSObject, ObservableObject {
         registerRemoteCommands()
         publishNowPlaying()
         relayClient.connect()
-        applyWalkAudioSetting()
+        scribeStream.start()
     }
 
     private func wireRelay() {
@@ -78,7 +76,7 @@ final class WalkController: NSObject, ObservableObject {
         let gate = microphoneGate
         let scribe = scribeStream
         audioPipeline.onMicrophoneChunk = { audioChunk in
-            guard gate.enabled else { return }
+            guard gate.phoneOwnsAudio else { return }
             if gate.recording && !gate.speaking {
                 scribe.sendAudio(audioChunk)
             } else {
@@ -101,6 +99,17 @@ final class WalkController: NSObject, ObservableObject {
         case "state":
             recording = payload["recording"] as? Bool ?? false
             pendingSend = payload["pending_send"] as? Bool ?? false
+            let owner = payload["audio"] as? String ?? "phone"
+            if owner != audioOwner {
+                audioOwner = owner
+                appendLog("audio owner: \(owner)")
+                if owner == "phone" {
+                    scribeStream.start()
+                } else {
+                    scribeStream.stop()
+                }
+            }
+            microphoneGate.phoneOwnsAudio = owner == "phone"
             microphoneGate.recording = recording
             refreshActivityStatus()
         case "sound":
@@ -130,19 +139,10 @@ final class WalkController: NSObject, ObservableObject {
             activityStatus = "sending"
         } else if speaking {
             activityStatus = "speaking"
-        } else if recording {
+        } else if recording && audioOwner == "phone" {
             activityStatus = "recording"
         } else {
             activityStatus = "idle"
-        }
-    }
-
-    private func applyWalkAudioSetting() {
-        microphoneGate.enabled = walkAudioEnabled
-        if walkAudioEnabled {
-            scribeStream.start()
-        } else {
-            scribeStream.stop()
         }
     }
 

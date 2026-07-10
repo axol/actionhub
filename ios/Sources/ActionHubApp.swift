@@ -2,39 +2,39 @@ import SwiftUI
 
 @main
 struct ActionHubApp: App {
-    @StateObject private var walkController = WalkController()
+    @StateObject private var phoneController = PhoneController()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(walkController)
+                .environmentObject(phoneController)
         }
     }
 }
 
 struct ContentView: View {
-    @EnvironmentObject var walkController: WalkController
+    @EnvironmentObject var phoneController: PhoneController
 
     var body: some View {
         VStack(spacing: 12) {
             Text("actionhub")
                 .font(.title2)
                 .bold()
-            Text(walkController.relayStatus)
+            Text(phoneController.relayStatus)
                 .foregroundStyle(.secondary)
-            Text(walkController.scribeStatus)
+            Text(phoneController.scribeStatus)
                 .foregroundStyle(.secondary)
-            Text(walkController.activityStatus)
+            Text("audio: \(phoneController.audioOwner)")
+                .foregroundStyle(.secondary)
+            Text(phoneController.activityStatus)
                 .font(.headline)
-            Toggle("walk audio", isOn: $walkController.walkAudioEnabled)
-                .padding(.horizontal)
-            List(Array(walkController.eventLog.reversed()), id: \.self) { eventLine in
+            List(Array(phoneController.eventLog.reversed()), id: \.self) { eventLine in
                 Text(eventLine)
                     .font(.system(.footnote, design: .monospaced))
             }
             .listStyle(.plain)
         }
         .padding()
-        .onAppear { walkController.start() }
+        .onAppear { phoneController.start() }
     }
 }
