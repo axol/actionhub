@@ -49,6 +49,8 @@ THINKING_VOLUME = 0.35
 RESPONSE_SOUND = os.path.join(SOUNDS_DIRECTORY, "response.mp3")
 RECORD_SOUND = os.path.join(SOUNDS_DIRECTORY, "record.mp3")
 STOP_SOUND = os.path.join(SOUNDS_DIRECTORY, "stop.mp3")
+FAILED_SOUND = os.path.join(SOUNDS_DIRECTORY, "failed.mp3")
+ACK_TIMEOUT_SECONDS = 10
 ACTIVITY_COOLDOWN_SECONDS = 1.5
 CLAUDE_PROJECTS_DIRECTORY = os.path.expanduser("~/.claude/projects")
 RECONNECT_DELAY_SECONDS = 3
@@ -88,6 +90,7 @@ status_bar_state = {
 audio_state = {"owner": "phone"}
 phone_link = {"connection": None}
 observed_lock = {"fingerprint": None, "fingerprint_time": 0.0, "hint_printed": False}
+pending_ack = {"text": None, "confirmed": True}
 
 
 def normalize_utterance(text):
@@ -203,8 +206,21 @@ def deliver_message(message_text):
     os.rename(temporary_path, final_path)
     observed_lock["fingerprint"] = message_text[:80]
     observed_lock["fingerprint_time"] = time.time()
+    pending_ack["text"] = message_text[:80]
+    pending_ack["confirmed"] = False
+    asyncio.create_task(alert_unconfirmed_delivery())
     print(f"[delivered to claude pid {session_entry['claudeProcessId']}]", file=sys.stderr)
     return True
+
+
+async def alert_unconfirmed_delivery():
+    ack_text = pending_ack["text"]
+    await asyncio.sleep(ACK_TIMEOUT_SECONDS)
+    if pending_ack["confirmed"] or pending_ack["text"] != ack_text:
+        return
+    play_sound(FAILED_SOUND)
+    send_phone_message({"type": "activity", "kind": "error", "text": "delivery not confirmed"})
+    print("[delivery not confirmed, session may not have voice channel]", file=sys.stderr)
 
 
 def emit_message(message_buffer):
@@ -325,8 +341,7 @@ async def consume_speak_requests(microphone_state, voice_activity_state, speech_
                 continue
             if "sound" in speak_request:
                 os.remove(file_path)
-                print(f"[claude received the message]", file=sys.stderr)
-                play_sound(EVENT_SOUNDS[speak_request["sound"]])
+                print("[channel ack]", file=sys.stderr)
                 continue
             if (
                 (audio_state["owner"] == "phone" and recording_state["recording"])
@@ -402,8 +417,35 @@ def locate_session_transcript(session_entry):
     return None
 
 
-def classify_transcript_line(line):
-    entry = json.loads(line)
+def extract_user_text(entry):
+    message = entry.get("message") or {}
+    if message.get("role") != "user":
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            block.get("text", "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+    return ""
+
+
+def confirm_pending_ack(entry):
+    if pending_ack["confirmed"] or not pending_ack["text"]:
+        return
+    if pending_ack["text"] not in extract_user_text(entry):
+        return
+    pending_ack["confirmed"] = True
+    clear_live_partial()
+    play_sound(EVENT_SOUNDS["delivered"])
+    send_phone_message({"type": "activity", "kind": "received", "text": "message received"})
+    print("[claude received the message]", file=sys.stderr)
+
+
+def classify_transcript_line(entry):
     message = entry.get("message") or {}
     content = message.get("content")
     if not isinstance(content, list):
@@ -454,9 +496,11 @@ async def observe_transcript():
         pending_text = lines.pop()
         for line in lines:
             try:
-                classified_event = classify_transcript_line(line)
+                entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            confirm_pending_ack(entry)
+            classified_event = classify_transcript_line(entry)
             if classified_event is None:
                 continue
             event_kind, event_description = classified_event
