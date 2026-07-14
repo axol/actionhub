@@ -37,6 +37,14 @@ enum SettingsSchema {
             showableOnMain: false
         ),
         SettingDefinition(
+            key: "showMuteButton",
+            label: "mute button",
+            kind: .toggle,
+            defaultValue: .flag(true),
+            scope: .phoneOnly,
+            showableOnMain: false
+        ),
+        SettingDefinition(
             key: "soundMap",
             label: "sound effects",
             kind: .soundMap,

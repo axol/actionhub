@@ -15,6 +15,7 @@ struct SettingsResolver {
     var sendPhraseEnabled: Bool { flagValue("sendPhraseEnabled") }
     var showDiscardButton: Bool { flagValue("showDiscardButton") }
     var showSendButton: Bool { flagValue("showSendButton") }
+    var showMuteButton: Bool { flagValue("showMuteButton") }
 
     var soundAssignments: [String: String] {
         guard case .soundAssignments(let assignments)? = values["soundMap"] else { return [:] }

@@ -80,6 +80,17 @@ struct MainView: View {
     private var controlButtons: some View {
         let settings = phoneController.presetStore.activeSettings
         return HStack(spacing: 16) {
+            if settings.showMuteButton {
+                Button {
+                    phoneController.toggleMute()
+                } label: {
+                    Image(systemName: phoneController.muted ? "mic.slash.fill" : "mic.slash")
+                        .font(.title)
+                        .frame(width: 64, height: 64)
+                }
+                .buttonStyle(.bordered)
+                .tint(phoneController.muted ? .red : nil)
+            }
             if settings.showDiscardButton {
                 Button {
                     phoneController.secondaryAction()

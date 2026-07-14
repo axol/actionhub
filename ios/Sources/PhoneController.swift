@@ -15,6 +15,7 @@ final class PhoneController: NSObject, ObservableObject {
     @Published var scribeStatus = "scribe: off"
     @Published var activityStatus = "idle"
     @Published var audioOwner = "phone"
+    @Published var muted = false
     @Published var eventLog: [String] = []
 
     let presetStore = PresetStore()
@@ -34,6 +35,7 @@ final class PhoneController: NSObject, ObservableObject {
     private var recording = false
     private var sending = false
     private var speaking = false
+    private var suppressedCommitCount = 0
     private var sendDrainTimeoutWorkItem: DispatchWorkItem?
     private var eventCounter = 0
     private var started = false
@@ -103,10 +105,23 @@ final class PhoneController: NSObject, ObservableObject {
         appendLog("took audio")
     }
 
+    func toggleMute() {
+        muted.toggle()
+        appendLog(muted ? "muted" : "unmuted")
+        playLocalSound(muted ? "stop" : "record")
+        refreshMicrophoneGate()
+        refreshActivityStatus()
+        sendStatus()
+    }
+
+    private func refreshMicrophoneGate() {
+        microphoneGate.recording = recording && !muted && !sending
+    }
+
     private func startListening() {
         guard !recording else { return }
         recording = true
-        microphoneGate.recording = true
+        refreshMicrophoneGate()
         playLocalSound("record")
         refreshActivityStatus()
         sendStatus()
@@ -115,12 +130,19 @@ final class PhoneController: NSObject, ObservableObject {
     private func stopListening() {
         guard recording else { return }
         recording = false
-        microphoneGate.recording = false
+        refreshMicrophoneGate()
         refreshActivityStatus()
         sendStatus()
     }
 
+    private func suppressInFlightPartial() {
+        guard !transcriptBuffer.livePartial.isEmpty else { return }
+        suppressedCommitCount += 1
+        scribeStream.commit()
+    }
+
     private func discard() {
+        suppressInFlightPartial()
         transcriptBuffer.clear()
         playLocalSound("stop")
         if presetStore.activeSettings.mode == "ptt" {
@@ -132,7 +154,7 @@ final class PhoneController: NSObject, ObservableObject {
 
     private func beginSend() {
         sending = true
-        microphoneGate.recording = false
+        refreshMicrophoneGate()
         refreshActivityStatus()
         sendStatus()
         scribeStream.commit()
@@ -155,9 +177,11 @@ final class PhoneController: NSObject, ObservableObject {
         sending = false
         sendDrainTimeoutWorkItem?.cancel()
         sendDrainTimeoutWorkItem = nil
+        suppressInFlightPartial()
         transcriptBuffer.clear()
         playLocalSound("stop")
         appendLog("send cancelled")
+        refreshMicrophoneGate()
         applyCaptureState()
         refreshActivityStatus()
         sendStatus()
@@ -170,7 +194,7 @@ final class PhoneController: NSObject, ObservableObject {
         relayClient.send(["type": "message", "text": transcriptBuffer.assembledText])
         transcriptBuffer.clear()
         recording = false
-        microphoneGate.recording = false
+        refreshMicrophoneGate()
         applyCaptureState()
         refreshActivityStatus()
         sendStatus()
@@ -256,7 +280,7 @@ final class PhoneController: NSObject, ObservableObject {
     private func sendStatus() {
         relayClient.send([
             "type": "status",
-            "recording": recording,
+            "recording": recording && !muted,
             "sending": sending,
             "buffer": transcriptBuffer.segments.count,
             "mode": presetStore.activeSettings.mode,
@@ -265,6 +289,10 @@ final class PhoneController: NSObject, ObservableObject {
 
     private func handleCommittedTranscript(_ text: String) {
         transcriptBuffer.livePartial = ""
+        if suppressedCommitCount > 0 {
+            suppressedCommitCount -= 1
+            return
+        }
         relayClient.send(["type": "utterance", "kind": "committed", "text": text])
         let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedText.isEmpty {
@@ -369,6 +397,8 @@ final class PhoneController: NSObject, ObservableObject {
             activityStatus = "sending"
         } else if speaking {
             activityStatus = "speaking"
+        } else if muted && audioOwner == "phone" {
+            activityStatus = "muted"
         } else if recording && audioOwner == "phone" {
             activityStatus = presetStore.activeSettings.mode == "vad" ? "listening" : "recording"
         } else {

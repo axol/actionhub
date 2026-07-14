@@ -9,6 +9,7 @@ final class AudioPipeline {
     private let speechFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 24000, channels: 1, interleaved: false)!
     private let scribeFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: Double(ScribeStream.sampleRate), channels: 1, interleaved: true)!
     private var microphoneConverter: AVAudioConverter?
+    private var converterInputFormat: AVAudioFormat?
     private var speechTask: Task<Void, Never>?
 
     func start() throws {
@@ -19,12 +20,31 @@ final class AudioPipeline {
         audioEngine.connect(speechPlayerNode, to: audioEngine.mainMixerNode, format: speechFormat)
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)
-        microphoneConverter = AVAudioConverter(from: inputFormat, to: scribeFormat)
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
             self?.handleMicrophoneBuffer(buffer)
         }
+        NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: audioEngine,
+            queue: .main
+        ) { [weak self] _ in
+            self?.restartEngineAfterConfigurationChange()
+        }
         audioEngine.prepare()
         try audioEngine.start()
+    }
+
+    private func restartEngineAfterConfigurationChange() {
+        let inputNode = audioEngine.inputNode
+        inputNode.removeTap(onBus: 0)
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            self?.handleMicrophoneBuffer(buffer)
+        }
+        if !audioEngine.isRunning {
+            audioEngine.prepare()
+            try? audioEngine.start()
+        }
     }
 
     func speak(_ text: String) {
@@ -41,6 +61,10 @@ final class AudioPipeline {
     }
 
     private func handleMicrophoneBuffer(_ buffer: AVAudioPCMBuffer) {
+        if microphoneConverter == nil || converterInputFormat != buffer.format {
+            microphoneConverter = AVAudioConverter(from: buffer.format, to: scribeFormat)
+            converterInputFormat = buffer.format
+        }
         guard let microphoneConverter else { return }
         let sampleRateRatio = scribeFormat.sampleRate / buffer.format.sampleRate
         let frameCapacity = AVAudioFrameCount(Double(buffer.frameLength) * sampleRateRatio) + 16

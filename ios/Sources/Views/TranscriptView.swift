@@ -11,6 +11,7 @@ struct TranscriptView: View {
                         HStack(alignment: .top) {
                             Text(segment.text)
                                 .font(.callout)
+                                .fixedSize(horizontal: false, vertical: true)
                             Spacer()
                             Button {
                                 transcriptBuffer.drop(segment.id)
@@ -27,6 +28,7 @@ struct TranscriptView: View {
                             .font(.callout)
                             .italic()
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 8)
                     }
                 }
