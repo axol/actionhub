@@ -64,30 +64,8 @@ class MainActivity : Activity() {
             try {
                 val session = Ctap2Session(result.value)
                 val clientDataHash = ByteArray(32) { 1 }
-                val relyingParty = mapOf("id" to "spike.actionhub", "name" to "ActionHub Spike")
-                val user = mapOf(
-                    "id" to ByteArray(16) { 2 },
-                    "name" to "spike",
-                    "displayName" to "spike",
-                )
-                val algorithms = listOf(mapOf("type" to "public-key", "alg" to -7))
-                appendLine("creating credential, touch the sensor when the key blinks...")
-                val credential = session.makeCredential(
-                    clientDataHash,
-                    relyingParty,
-                    user,
-                    algorithms,
-                    null,
-                    null,
-                    mapOf("uv" to true),
-                    null,
-                    null,
-                    null,
-                    null,
-                )
-                val credentialId = extractCredentialId(credential.authenticatorData)
-                appendLine("credential created, id ${credentialId.size} bytes")
-                appendLine("requesting assertion, touch the sensor again...")
+                val credentialId = storedCredentialId() ?: createAndStoreCredential(session, clientDataHash)
+                appendLine("requesting assertion, touch the sensor...")
                 val assertions = session.getAssertions(
                     "spike.actionhub",
                     clientDataHash,
@@ -107,6 +85,41 @@ class MainActivity : Activity() {
                 appendLine("assertion test failed: $assertionError")
             }
         }
+    }
+
+    private fun createAndStoreCredential(session: Ctap2Session, clientDataHash: ByteArray): ByteArray {
+        val relyingParty = mapOf("id" to "spike.actionhub", "name" to "ActionHub Spike")
+        val user = mapOf(
+            "id" to ByteArray(16) { 2 },
+            "name" to "spike",
+            "displayName" to "spike",
+        )
+        val algorithms = listOf(mapOf("type" to "public-key", "alg" to -7))
+        appendLine("no stored credential, creating one (pairing step), touch the sensor...")
+        val credential = session.makeCredential(
+            clientDataHash,
+            relyingParty,
+            user,
+            algorithms,
+            null,
+            null,
+            mapOf("uv" to true),
+            null,
+            null,
+            null,
+            null,
+        )
+        val credentialId = extractCredentialId(credential.authenticatorData)
+        getPreferences(MODE_PRIVATE).edit()
+            .putString("credentialId", android.util.Base64.encodeToString(credentialId, android.util.Base64.NO_WRAP))
+            .apply()
+        appendLine("credential created and stored, id ${credentialId.size} bytes")
+        return credentialId
+    }
+
+    private fun storedCredentialId(): ByteArray? {
+        val encodedId = getPreferences(MODE_PRIVATE).getString("credentialId", null) ?: return null
+        return android.util.Base64.decode(encodedId, android.util.Base64.NO_WRAP)
     }
 
     private fun extractCredentialId(authenticatorData: ByteArray): ByteArray {
