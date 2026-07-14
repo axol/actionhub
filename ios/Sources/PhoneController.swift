@@ -124,6 +124,7 @@ final class PhoneController: NSObject, ObservableObject {
         refreshMicrophoneGate()
         playLocalSound("record")
         refreshActivityStatus()
+        updateNowPlayingRate()
         sendStatus()
     }
 
@@ -131,8 +132,14 @@ final class PhoneController: NSObject, ObservableObject {
         guard recording else { return }
         recording = false
         refreshMicrophoneGate()
+        playLocalSound("stop")
         refreshActivityStatus()
+        updateNowPlayingRate()
         sendStatus()
+    }
+
+    private func updateNowPlayingRate() {
+        MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] = recording ? 1.0 : 0.0
     }
 
     private func suppressInFlightPartial() {
@@ -144,9 +151,10 @@ final class PhoneController: NSObject, ObservableObject {
     private func discard() {
         suppressInFlightPartial()
         transcriptBuffer.clear()
-        playLocalSound("stop")
         if presetStore.activeSettings.mode == "ptt" {
             stopListening()
+        } else {
+            playLocalSound("stop")
         }
         refreshActivityStatus()
         sendStatus()
@@ -464,6 +472,30 @@ final class PhoneController: NSObject, ObservableObject {
             primaryAction()
         case "previousTrackCommand":
             secondaryAction()
+        case "pauseCommand", "stopCommand":
+            appendLog(commandName)
+            if audioOwner == "phone" && !sending {
+                stopListening()
+            }
+        case "playCommand":
+            appendLog(commandName)
+            if audioOwner != "phone" {
+                takeAudio()
+            }
+            if !sending {
+                startListening()
+            }
+        case "togglePlayPauseCommand":
+            appendLog(commandName)
+            if audioOwner != "phone" {
+                takeAudio()
+            }
+            if sending { return }
+            if recording {
+                stopListening()
+            } else {
+                startListening()
+            }
         default:
             appendLog(commandName)
         }
