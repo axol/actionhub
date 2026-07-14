@@ -470,7 +470,7 @@ def classify_transcript_line(entry):
     if message.get("role") == "assistant":
         text = " ".join(block.get("text", "") for block in blocks if block.get("type") == "text").strip()
         if text:
-            return ("response", text[:100])
+            return ("response", text[:2000])
     return None
 
 
