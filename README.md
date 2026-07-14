@@ -1,10 +1,10 @@
 # ActionHub
 
-Voice-first, screen-optional control of Claude Code sessions. One hub, paired devices, a dumb encrypted relay.
+Voice-first, screen-optional control of Claude Code sessions. One bridge on the Mac, paired devices, a dumb encrypted relay.
 
 ## Structure
 
-- `hub/` — Mac daemon (voice engine, session registry, transcript observer, routing)
+- `bridge/` — Mac daemon (voice engine, session registry, transcript observer, routing)
 - `relay/` — Cloudflare Worker + Durable Object, blind message relay (`relay.babelbase.com`)
 - `ios/` — iPhone: on-device STT/TTS, media buttons, earcons; usable walking, in the car, anywhere
 - `android/` — Daylight DC1 viewer (read-only sessions, YubiKey-gated actions)
@@ -16,7 +16,7 @@ Voice-first, screen-optional control of Claude Code sessions. One hub, paired de
 
 1. **Phone audio** — phone streams mic to Scribe directly, text + buttons over relay, TTS on phone; audio ownership toggles between phone (default, push-to-talk) and Mac (VAD listening)
 2. **E2E envelopes** — libsodium sealed boxes + signatures, device pairing, relay sees nothing
-3. **Session hub** — multiple Claude sessions, switching, per-session routing
+3. **Session switching** — multiple Claude sessions, switching, per-session routing
 4. **Daylight viewer** — terminal view, branch commits with own-session highlighting, PR view
 5. **YubiKey escalation** — FIDO2 assertion for privileged actions from viewer devices
 6. **Agent-pushed HTML/browser** — agent sends HTML or opens URLs on devices
@@ -33,10 +33,10 @@ let elevenLabsApiKey = "$ELEVENLABS_API_KEY"
 EOF
 ```
 
-## Running the hub
+## Running the bridge
 
 ```sh
-python3 hub/dictate.py
+python3 bridge/dictate.py
 ```
 
 Requires `ELEVENLABS_API_KEY` and `DICTATE_RELAY_TOKEN` in the environment.
@@ -50,8 +50,8 @@ so migrate deliberately: `wrangler delete` the old worker, `wrangler deploy` her
 
 ## Migration notes
 
-- `~/Downloads/claude/voice-engine/` is the frozen car-tested setup; `hub/` is the canonical
-  evolving copy. Switch by running `hub/dictate.py` instead.
+- `~/Downloads/claude/voice-engine/` is the frozen car-tested setup; `bridge/` is the canonical
+  evolving copy. Switch by running `bridge/dictate.py` instead.
 - The user-scope voice MCP registration still points at `~/Downloads/claude/voice-channel/channel.mjs`.
   Re-register when switching: `claude mcp add --scope user voice -- node ~/Coding/actionhub/channels/voice-channel/channel.mjs`
 - `~/Coding/dictate-remote/` (car remote iOS app) is fully superseded by `ios/` — the phone's

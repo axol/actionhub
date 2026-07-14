@@ -58,7 +58,6 @@ DISCONNECT_ALERT_INTERVAL_SECONDS = 15
 SPEAK_IDLE_SECONDS = 1.5
 
 DRAIN_TIMEOUT_SECONDS = 2.5
-PHONE_SEND_TIMEOUT_SECONDS = 6
 COMMIT_SENTINEL = object()
 
 VOICE_BASE_DIRECTORY = "/tmp/claude-voice"
@@ -89,7 +88,7 @@ status_bar_state = {
 }
 
 audio_state = {"owner": "phone"}
-phone_state = {"mode": "ptt", "buffer_count": 0}
+phone_state = {"mode": "ptt", "recording": False, "sending": False, "buffer_count": 0}
 phone_link = {"connection": None}
 observed_lock = {"fingerprint": None, "fingerprint_time": 0.0, "hint_printed": False}
 pending_ack = {"text": None, "confirmed": True}
@@ -125,12 +124,7 @@ def send_phone_message(payload):
 
 
 def send_phone_state(recording_state):
-    send_phone_message({
-        "type": "state",
-        "recording": recording_state["recording"],
-        "pending_send": recording_state["pending_send"],
-        "audio": audio_state["owner"],
-    })
+    send_phone_message({"type": "state", "audio": audio_state["owner"]})
 
 
 def play_sound(sound_file, volume=None):
@@ -241,26 +235,11 @@ def emit_message_text(message_text):
         play_sound(CANCEL_SOUND)
 
 
-def handle_phone_message(message_text, recording_state):
-    recording_state["pending_send"] = False
-    if audio_state["owner"] == "phone":
-        recording_state["recording"] = phone_state["mode"] == "vad"
+def handle_phone_message(message_text):
     if message_text.strip():
         emit_message_text(message_text.strip())
     else:
         print("[nothing to send]", file=sys.stderr)
-    send_phone_state(recording_state)
-
-
-async def reset_unanswered_send(recording_state):
-    await asyncio.sleep(PHONE_SEND_TIMEOUT_SECONDS)
-    if not recording_state["pending_send"]:
-        return
-    recording_state["pending_send"] = False
-    if audio_state["owner"] == "phone":
-        recording_state["recording"] = phone_state["mode"] == "vad"
-    print("[phone send timed out]", file=sys.stderr)
-    send_phone_state(recording_state)
 
 
 def finalize_pending_send(message_buffer, recording_state):
@@ -299,8 +278,6 @@ def handle_committed_utterance(text, message_buffer, recording_state):
         print(f"[idle utterance ignored] {utterance}", file=sys.stderr)
         return
     if matches_any_phrase(normalized_text, SEND_PHRASES):
-        if audio_state["owner"] == "phone":
-            recording_state["recording"] = False
         if message_buffer:
             emit_message(message_buffer)
         else:
@@ -371,16 +348,15 @@ async def consume_speak_requests(microphone_state, voice_activity_state, speech_
                 os.remove(file_path)
                 print("[channel ack]", file=sys.stderr)
                 continue
-            phone_push_to_talk_active = (
-                audio_state["owner"] == "phone"
-                and phone_state["mode"] == "ptt"
-                and recording_state["recording"]
+            phone_busy = audio_state["owner"] == "phone" and (
+                phone_state["sending"]
+                or phone_state["buffer_count"]
+                or (phone_state["mode"] == "ptt" and phone_state["recording"])
             )
             if (
-                phone_push_to_talk_active
+                phone_busy
                 or recording_state["pending_send"]
                 or message_buffer
-                or phone_state["buffer_count"]
                 or user_recently_spoke(voice_activity_state)
             ):
                 break
@@ -565,14 +541,9 @@ def queue_speak_request(text):
 def toggle_audio_owner(message_buffer, recording_state):
     if audio_state["owner"] == "mac":
         audio_state["owner"] = "phone"
-        recording_state["recording"] = phone_state["mode"] == "vad"
+        recording_state["recording"] = False
         recording_state["pending_send"] = False
-        if recording_state["recording"]:
-            play_sound(RECORD_SOUND)
-            print("[phone audio, listening]", file=sys.stderr)
-        else:
-            play_sound(STOP_SOUND)
-            print("[phone audio]", file=sys.stderr)
+        print("[phone audio]", file=sys.stderr)
     else:
         audio_state["owner"] = "mac"
         recording_state["recording"] = True
@@ -583,78 +554,43 @@ def toggle_audio_owner(message_buffer, recording_state):
     render_status_bar()
 
 
-def request_transcript_commit(recording_state, audio_queue):
-    if audio_state["owner"] == "mac":
-        audio_queue.put_nowait(COMMIT_SENTINEL)
-    else:
-        send_phone_message({"type": "commit"})
-
-
-def handle_remote_command(command, message_buffer, speech_state, playback_state, recording_state, audio_queue, source="phone"):
-    if command == "ping":
+def handle_keyboard_command(command, message_buffer, playback_state, recording_state, audio_queue):
+    print(f"[key] {command}", file=sys.stderr)
+    if audio_state["owner"] != "mac":
+        print("[phone owns audio, press v to take it]", file=sys.stderr)
         return
-    print(f"[{source}] {command}", file=sys.stderr)
-    if source == "phone" and audio_state["owner"] == "mac":
-        audio_state["owner"] = "phone"
-        recording_state["recording"] = phone_state["mode"] == "vad"
-        print("[phone took audio]", file=sys.stderr)
-    if command == "previousTrackCommand":
+    if command == "previous":
         if playback_state["active"]:
             playback_state["stop_requested"] = True
-            send_phone_message({"type": "stop_playback"})
             recording_state["recording"] = True
             play_sound(RECORD_SOUND)
-            print("[playback stopped, recording]", file=sys.stderr)
+            print("[playback stopped, listening]", file=sys.stderr)
         elif recording_state["recording"]:
             message_buffer.clear()
             play_sound(STOP_SOUND)
-            if audio_state["owner"] == "mac":
-                print("[buffer discarded]", file=sys.stderr)
-            else:
-                send_phone_message({"type": "discard"})
-                if phone_state["mode"] == "vad":
-                    print("[buffer discarded]", file=sys.stderr)
-                else:
-                    recording_state["recording"] = False
-                    print("[recording discarded]", file=sys.stderr)
+            print("[buffer discarded]", file=sys.stderr)
         elif recording_state["pending_send"]:
             recording_state["pending_send"] = False
             message_buffer.clear()
             play_sound(STOP_SOUND)
-            if audio_state["owner"] == "mac":
-                recording_state["recording"] = True
-                print("[send cancelled, listening]", file=sys.stderr)
-            else:
-                send_phone_message({"type": "discard"})
-                recording_state["recording"] = phone_state["mode"] == "vad"
-                print("[send cancelled]", file=sys.stderr)
-        else:
-            play_sound(STOP_SOUND)
-            print("[nothing playing]", file=sys.stderr)
-        send_phone_state(recording_state)
-        return
-    if command != "nextTrackCommand":
-        send_phone_state(recording_state)
+            recording_state["recording"] = True
+            print("[send cancelled, listening]", file=sys.stderr)
         return
     if recording_state["recording"]:
         recording_state["recording"] = False
         recording_state["pending_send"] = True
-        request_transcript_commit(recording_state, audio_queue)
+        audio_queue.put_nowait(COMMIT_SENTINEL)
         print("[waiting for final transcript...]", file=sys.stderr)
-        if audio_state["owner"] == "mac":
-            asyncio.create_task(finalize_send_after_timeout(message_buffer, recording_state))
-        else:
-            asyncio.create_task(reset_unanswered_send(recording_state))
+        asyncio.create_task(finalize_send_after_timeout(message_buffer, recording_state))
     elif recording_state["pending_send"]:
         print("[already sending]", file=sys.stderr)
     else:
         recording_state["recording"] = True
         play_sound(RECORD_SOUND)
-        print("[recording]", file=sys.stderr)
-    send_phone_state(recording_state)
+        print("[listening]", file=sys.stderr)
 
 
-def setup_keyboard(event_loop, message_buffer, speech_state, playback_state, recording_state, audio_queue):
+def setup_keyboard(event_loop, message_buffer, playback_state, recording_state, audio_queue):
     if not sys.stdin.isatty():
         return
     stdin_descriptor = sys.stdin.fileno()
@@ -665,9 +601,9 @@ def setup_keyboard(event_loop, message_buffer, speech_state, playback_state, rec
     def on_keyboard_input():
         key_bytes = os.read(stdin_descriptor, 16)
         if key_bytes == b"\x1b[C":
-            handle_remote_command("nextTrackCommand", message_buffer, speech_state, playback_state, recording_state, audio_queue, source="key")
+            handle_keyboard_command("next", message_buffer, playback_state, recording_state, audio_queue)
         elif key_bytes == b"\x1b[D":
-            handle_remote_command("previousTrackCommand", message_buffer, speech_state, playback_state, recording_state, audio_queue, source="key")
+            handle_keyboard_command("previous", message_buffer, playback_state, recording_state, audio_queue)
         elif key_bytes in (b"v", b"V"):
             toggle_audio_owner(message_buffer, recording_state)
 
@@ -680,9 +616,15 @@ def render_status_bar():
         return
     recording_state = status_bar_state["recording_state"]
     playback_state = status_bar_state["playback_state"]
-    if recording_state["pending_send"]:
+    if audio_state["owner"] == "mac":
+        currently_sending = recording_state["pending_send"]
+        currently_recording = recording_state["recording"]
+    else:
+        currently_sending = phone_state["sending"]
+        currently_recording = phone_state["recording"]
+    if currently_sending:
         activity = "sending"
-    elif recording_state["recording"]:
+    elif currently_recording:
         if audio_state["owner"] == "mac" or phone_state["mode"] == "vad":
             activity = "listening"
         else:
@@ -767,7 +709,7 @@ async def refresh_status_bar():
         await asyncio.sleep(STATUS_REFRESH_SECONDS)
 
 
-def handle_phone_event(phone_event, message_buffer, voice_activity_state, speech_state, playback_state, recording_state, audio_queue):
+def handle_phone_event(phone_event, voice_activity_state, playback_state, recording_state):
     status_bar_state["phone_last_seen"] = time.monotonic()
     event_type = phone_event.get("type")
     if event_type == "presence":
@@ -775,8 +717,21 @@ def handle_phone_event(phone_event, message_buffer, voice_activity_state, speech
     if event_type == "hello":
         print(f"[phone] {phone_event.get('device')}", file=sys.stderr)
         send_phone_state(recording_state)
-    elif event_type == "command":
-        handle_remote_command(phone_event.get("command", ""), message_buffer, speech_state, playback_state, recording_state, audio_queue, source="phone")
+    elif event_type == "take_audio":
+        if audio_state["owner"] != "phone":
+            audio_state["owner"] = "phone"
+            recording_state["recording"] = False
+            recording_state["pending_send"] = False
+            print("[phone took audio]", file=sys.stderr)
+        send_phone_state(recording_state)
+    elif event_type == "status":
+        previously_recording = phone_state["recording"]
+        phone_state["mode"] = phone_event.get("mode", phone_state["mode"])
+        phone_state["recording"] = bool(phone_event.get("recording"))
+        phone_state["sending"] = bool(phone_event.get("sending"))
+        phone_state["buffer_count"] = int(phone_event.get("buffer", 0))
+        if phone_state["recording"] != previously_recording:
+            print("[phone recording]" if phone_state["recording"] else "[phone idle]", file=sys.stderr)
     elif event_type == "utterance":
         text = phone_event.get("text", "")
         if text.strip():
@@ -787,26 +742,18 @@ def handle_phone_event(phone_event, message_buffer, voice_activity_state, speech
                 print(f"[phone] {text.strip()}", file=sys.stderr)
         else:
             show_live_partial(text)
-    elif event_type == "config":
-        phone_state["mode"] = phone_event.get("mode", "ptt")
-        print(f"[phone mode] {phone_state['mode']}", file=sys.stderr)
-        if audio_state["owner"] == "phone" and not recording_state["pending_send"]:
-            recording_state["recording"] = phone_state["mode"] == "vad"
-            send_phone_state(recording_state)
     elif event_type == "message":
-        handle_phone_message(phone_event.get("text", ""), recording_state)
-    elif event_type == "buffer":
-        phone_state["buffer_count"] = int(phone_event.get("count", 0))
+        handle_phone_message(phone_event.get("text", ""))
     elif event_type == "playback":
         playback_state["active"] = bool(phone_event.get("active"))
 
 
-async def consume_phone_events(message_buffer, voice_activity_state, speech_state, playback_state, recording_state, audio_queue):
+async def consume_phone_events(voice_activity_state, playback_state, recording_state):
     relay_token = os.environ.get("DICTATE_RELAY_TOKEN")
     if not relay_token:
         print("[relay disabled, DICTATE_RELAY_TOKEN not set]", file=sys.stderr)
         return
-    relay_url = f"wss://relay.babelbase.com/?role=mac&room=hub&token={relay_token}"
+    relay_url = f"wss://relay.babelbase.com/?role=mac&room=actionhub&token={relay_token}"
     while True:
         try:
             async with websockets.connect(relay_url) as phone_connection:
@@ -821,7 +768,7 @@ async def consume_phone_events(message_buffer, voice_activity_state, speech_stat
                         phone_event = json.loads(raw_message)
                     except json.JSONDecodeError:
                         continue
-                    handle_phone_event(phone_event, message_buffer, voice_activity_state, speech_state, playback_state, recording_state, audio_queue)
+                    handle_phone_event(phone_event, voice_activity_state, playback_state, recording_state)
         except (websockets.exceptions.WebSocketException, OSError) as relay_error:
             print(f"[relay disconnected, retrying in 5s] {relay_error!r}", file=sys.stderr)
         finally:
@@ -951,13 +898,13 @@ async def main():
     ):
         setup_status_bar(message_buffer, recording_state, playback_state)
         event_loop.add_signal_handler(signal.SIGWINCH, handle_terminal_resize)
-        setup_keyboard(event_loop, message_buffer, speech_state, playback_state, recording_state, audio_queue)
+        setup_keyboard(event_loop, message_buffer, playback_state, recording_state, audio_queue)
         print("[audio: phone] press v to switch to mac listening", file=sys.stderr)
         await asyncio.gather(
             transcribe_forever(api_key, audio_queue, message_buffer, voice_activity_state, recording_state, sample_rate),
             consume_speak_requests(microphone_state, voice_activity_state, speech_state, playback_state, recording_state, message_buffer),
             observe_transcript(),
-            consume_phone_events(message_buffer, voice_activity_state, speech_state, playback_state, recording_state, audio_queue),
+            consume_phone_events(voice_activity_state, playback_state, recording_state),
             refresh_status_bar(),
         )
 
