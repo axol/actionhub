@@ -41,12 +41,23 @@ python3 mac/dictate.py
 
 Requires `ELEVENLABS_API_KEY` and `DICTATE_RELAY_TOKEN` in the environment.
 
+## Pairing a viewer
+
+Pairing is a deliberate ceremony, separate from the daemon:
+
+```sh
+cd mac && python3 pair.py
+```
+
+Press pair on the viewer, compare the key fingerprint printed on the mac, confirm with `y`.
+Accepted peers land in `~/.config/actionhub/peers.json`; every privileged viewer action then
+requires a fresh YubiKey fingerprint assertion verified by the daemon.
+
 ## Relay deployment
 
-`relay/` is the canonical worker source. The live deployment at `relay.babelbase.com` is still the
-`dictate-relay` worker (identical code). Deploying `actionhub-relay` claims the same custom domain,
-so migrate deliberately: `wrangler delete` the old worker, `wrangler deploy` here, then
-`wrangler secret put RELAY_TOKEN`.
+`relay/` is the canonical worker source and is deployed as `actionhub-relay` at
+`relay.babelbase.com`. Redeploy with `npx wrangler deploy`; the token lives in the
+`RELAY_TOKEN` worker secret.
 
 ## Migration notes
 

@@ -19,9 +19,10 @@ import urllib.request
 
 import sounddevice
 import websockets
-from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+
+from peers import load_peers, save_peers
 
 MICROPHONE_NAME = os.environ.get("DICTATE_MICROPHONE", "MacBook Air Microphone")
 CANDIDATE_SAMPLE_RATES = (16000, 24000, 44100, 48000)
@@ -99,119 +100,9 @@ phone_link = {"connection": None}
 observed_lock = {"fingerprint": None, "fingerprint_time": 0.0, "hint_printed": False}
 pending_ack = {"text": None, "confirmed": True}
 
-PEERS_FILE = os.path.expanduser("~/.config/actionhub/peers.json")
 CHALLENGE_LIFETIME_SECONDS = 120
 
-pending_pairing = {"request": None}
 pending_challenges = {}
-
-
-def parse_cbor_item(data, offset):
-    initial_byte = data[offset]
-    major_type = initial_byte >> 5
-    additional = initial_byte & 0x1F
-    offset += 1
-    if additional < 24:
-        argument = additional
-    elif additional == 24:
-        argument = data[offset]
-        offset += 1
-    elif additional == 25:
-        argument = int.from_bytes(data[offset:offset + 2], "big")
-        offset += 2
-    elif additional == 26:
-        argument = int.from_bytes(data[offset:offset + 4], "big")
-        offset += 4
-    else:
-        raise ValueError(f"unsupported cbor additional info {additional}")
-    if major_type == 0:
-        return argument, offset
-    if major_type == 1:
-        return -1 - argument, offset
-    if major_type == 2:
-        return data[offset:offset + argument], offset + argument
-    if major_type == 3:
-        return data[offset:offset + argument].decode(), offset + argument
-    if major_type == 5:
-        decoded_map = {}
-        for _ in range(argument):
-            key, offset = parse_cbor_item(data, offset)
-            value, offset = parse_cbor_item(data, offset)
-            decoded_map[key] = value
-        return decoded_map, offset
-    raise ValueError(f"unsupported cbor major type {major_type}")
-
-
-def cose_key_to_pem(cose_key):
-    x_coordinate = int.from_bytes(cose_key[-2], "big")
-    y_coordinate = int.from_bytes(cose_key[-3], "big")
-    public_key = ec.EllipticCurvePublicNumbers(x_coordinate, y_coordinate, ec.SECP256R1()).public_key()
-    return public_key.public_bytes(
-        serialization.Encoding.PEM,
-        serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode()
-
-
-def parse_pairing_data(authenticator_data):
-    sign_count = int.from_bytes(authenticator_data[33:37], "big")
-    credential_id_length = int.from_bytes(authenticator_data[53:55], "big")
-    credential_id = authenticator_data[55:55 + credential_id_length]
-    cose_key, _ = parse_cbor_item(authenticator_data, 55 + credential_id_length)
-    return credential_id, cose_key_to_pem(cose_key), sign_count
-
-
-def load_peers():
-    try:
-        with open(PEERS_FILE) as peers_file:
-            return json.load(peers_file)
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-
-def save_peers(peers):
-    os.makedirs(os.path.dirname(PEERS_FILE), exist_ok=True)
-    with open(PEERS_FILE, "w") as peers_file:
-        json.dump(peers, peers_file, indent=2)
-
-
-def handle_pair_request(pair_event):
-    try:
-        authenticator_data = base64.b64decode(pair_event["authenticator_data"])
-        credential_id, public_key_pem, sign_count = parse_pairing_data(authenticator_data)
-    except Exception as pairing_error:
-        print(f"[pairing request unreadable] {pairing_error!r}", file=sys.stderr)
-        return
-    key_fingerprint = hashlib.sha256(public_key_pem.encode()).hexdigest()[:16]
-    pending_pairing["request"] = {
-        "credential_id": base64.b64encode(credential_id).decode(),
-        "public_key_pem": public_key_pem,
-        "sign_count": sign_count,
-    }
-    print(f"[pairing request] key fingerprint {key_fingerprint} — press y to accept, n to reject", file=sys.stderr)
-
-
-def accept_pairing():
-    request = pending_pairing["request"]
-    if request is None:
-        return
-    pending_pairing["request"] = None
-    peers = load_peers()
-    peers[request["credential_id"]] = {
-        "public_key_pem": request["public_key_pem"],
-        "sign_count": request["sign_count"],
-        "paired_at": datetime.datetime.now().isoformat(),
-    }
-    save_peers(peers)
-    send_phone_message({"type": "paired"})
-    print("[pairing accepted]", file=sys.stderr)
-
-
-def reject_pairing():
-    if pending_pairing["request"] is None:
-        return
-    pending_pairing["request"] = None
-    send_phone_message({"type": "pair_rejected"})
-    print("[pairing rejected]", file=sys.stderr)
 
 
 def issue_challenge():
@@ -777,10 +668,6 @@ def setup_keyboard(event_loop, message_buffer, playback_state, recording_state, 
             handle_keyboard_command("previous", message_buffer, playback_state, recording_state, audio_queue)
         elif key_bytes in (b"v", b"V"):
             toggle_audio_owner(message_buffer, recording_state)
-        elif key_bytes in (b"y", b"Y"):
-            accept_pairing()
-        elif key_bytes in (b"n", b"N"):
-            reject_pairing()
 
     event_loop.add_reader(stdin_descriptor, on_keyboard_input)
     print("[keys] right=send  left=discard  v=mac/phone audio", file=sys.stderr)
@@ -937,7 +824,7 @@ def handle_phone_event(phone_event, voice_activity_state, playback_state, record
     elif event_type == "message":
         handle_phone_message(phone_event.get("text", ""))
     elif event_type == "pair":
-        handle_pair_request(phone_event)
+        print("[pairing request received — run mac/pair.py for the pairing ceremony]", file=sys.stderr)
     elif event_type == "challenge_request":
         issue_challenge()
     elif event_type == "action":
