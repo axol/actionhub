@@ -17,6 +17,14 @@ final class PhoneController: NSObject, ObservableObject {
     @Published var audioOwner = "phone"
     @Published var eventLog: [String] = []
 
+    let presetStore = PresetStore()
+    let soundLibrary = SoundLibrary()
+    let transcriptBuffer = TranscriptBuffer()
+
+    private static let sendPhrase = "the message is now complete"
+    private static let sendPhraseMatchThreshold = 0.8
+    private static let sendDrainTimeoutSeconds = 2.5
+
     private let relayClient = RelayClient()
     private let scribeStream = ScribeStream()
     private let audioPipeline = AudioPipeline()
@@ -26,6 +34,8 @@ final class PhoneController: NSObject, ObservableObject {
     private var recording = false
     private var pendingSend = false
     private var speaking = false
+    private var awaitingCommitForSend = false
+    private var sendDrainTimeoutWorkItem: DispatchWorkItem?
     private var eventCounter = 0
     private var started = false
 
@@ -35,6 +45,8 @@ final class PhoneController: NSObject, ObservableObject {
         wireRelay()
         wireScribe()
         wireAudioPipeline()
+        wirePresets()
+        wireTranscriptBuffer()
         do {
             try audioPipeline.start()
         } catch {
@@ -52,7 +64,9 @@ final class PhoneController: NSObject, ObservableObject {
             self?.relayStatus = status
         }
         relayClient.onOpen = { [weak self] in
-            self?.relayClient.send(["type": "hello", "device": UIDevice.current.name])
+            guard let self else { return }
+            relayClient.send(["type": "hello", "device": UIDevice.current.name])
+            sendConfig()
         }
         relayClient.onMessage = { [weak self] payload in
             self?.handleHubMessage(payload)
@@ -64,11 +78,12 @@ final class PhoneController: NSObject, ObservableObject {
             self?.scribeStatus = status
         }
         scribeStream.onPartial = { [weak self] text in
-            self?.relayClient.send(["type": "utterance", "kind": "partial", "text": text])
+            guard let self else { return }
+            transcriptBuffer.livePartial = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            relayClient.send(["type": "utterance", "kind": "partial", "text": text])
         }
         scribeStream.onCommitted = { [weak self] text in
-            self?.appendLog("committed: \(text)")
-            self?.relayClient.send(["type": "utterance", "kind": "committed", "text": text])
+            self?.handleCommittedTranscript(text)
         }
     }
 
@@ -94,6 +109,96 @@ final class PhoneController: NSObject, ObservableObject {
         }
     }
 
+    private func wirePresets() {
+        presetStore.onSettingsChange = { [weak self] in
+            self?.objectWillChange.send()
+        }
+        presetStore.onSharedSettingsChange = { [weak self] in
+            self?.sendConfig()
+        }
+    }
+
+    private func wireTranscriptBuffer() {
+        transcriptBuffer.onSegmentCountChange = { [weak self] segmentCount in
+            self?.relayClient.send(["type": "buffer", "count": segmentCount])
+        }
+    }
+
+    private func sendConfig() {
+        relayClient.send(["type": "config", "mode": presetStore.activeSettings.mode])
+    }
+
+    private func handleCommittedTranscript(_ text: String) {
+        transcriptBuffer.livePartial = ""
+        relayClient.send(["type": "utterance", "kind": "committed", "text": text])
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedText.isEmpty {
+            appendLog("committed: \(trimmedText)")
+        }
+        if presetStore.activeSettings.sendPhraseEnabled && Self.matchesSendPhrase(trimmedText) {
+            completeSend()
+            return
+        }
+        transcriptBuffer.appendCommitted(trimmedText)
+        if awaitingCommitForSend {
+            completeSend()
+        }
+    }
+
+    private func beginSendDrain() {
+        awaitingCommitForSend = true
+        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            self?.completeSend()
+        }
+        sendDrainTimeoutWorkItem = timeoutWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.sendDrainTimeoutSeconds, execute: timeoutWorkItem)
+        if transcriptBuffer.livePartial.isEmpty {
+            completeSend()
+        }
+    }
+
+    private func completeSend() {
+        awaitingCommitForSend = false
+        sendDrainTimeoutWorkItem?.cancel()
+        sendDrainTimeoutWorkItem = nil
+        relayClient.send(["type": "message", "text": transcriptBuffer.assembledText])
+        transcriptBuffer.clear()
+    }
+
+    private static func matchesSendPhrase(_ text: String) -> Bool {
+        let normalizedText = normalize(text)
+        guard !normalizedText.isEmpty else { return false }
+        return similarity(normalizedText, sendPhrase) >= sendPhraseMatchThreshold
+    }
+
+    private static func normalize(_ text: String) -> String {
+        text.lowercased()
+            .filter { character in character.isLetter || character == " " }
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    private static func similarity(_ leftText: String, _ rightText: String) -> Double {
+        let leftCharacters = Array(leftText)
+        let rightCharacters = Array(rightText)
+        guard !leftCharacters.isEmpty && !rightCharacters.isEmpty else { return 0 }
+        var previousRow = Array(0...rightCharacters.count)
+        for leftIndex in 1...leftCharacters.count {
+            var currentRow = [leftIndex]
+            for rightIndex in 1...rightCharacters.count {
+                let substitutionCost = leftCharacters[leftIndex - 1] == rightCharacters[rightIndex - 1] ? 0 : 1
+                currentRow.append(min(
+                    previousRow[rightIndex] + 1,
+                    currentRow[rightIndex - 1] + 1,
+                    previousRow[rightIndex - 1] + substitutionCost
+                ))
+            }
+            previousRow = currentRow
+        }
+        let editDistance = Double(previousRow[rightCharacters.count])
+        let maximumLength = Double(max(leftCharacters.count, rightCharacters.count))
+        return 1 - editDistance / maximumLength
+    }
+
     private func handleHubMessage(_ payload: [String: Any]) {
         switch payload["type"] as? String {
         case "state":
@@ -117,8 +222,10 @@ final class PhoneController: NSObject, ObservableObject {
                 appendLog("claude: \(text)")
             }
         case "sound":
-            if let soundName = payload["name"] as? String {
-                soundPlayer.play(soundName)
+            if let eventName = payload["name"] as? String,
+               let soundName = presetStore.activeSettings.soundName(for: eventName),
+               let soundUrl = soundLibrary.url(for: soundName) {
+                soundPlayer.play(soundUrl)
             }
         case "speak":
             if let text = payload["text"] as? String {
@@ -133,6 +240,9 @@ final class PhoneController: NSObject, ObservableObject {
             audioPipeline.stopSpeaking()
         case "commit":
             scribeStream.commit()
+            beginSendDrain()
+        case "discard":
+            transcriptBuffer.clear()
         default:
             break
         }
@@ -144,7 +254,7 @@ final class PhoneController: NSObject, ObservableObject {
         } else if speaking {
             activityStatus = "speaking"
         } else if recording && audioOwner == "phone" {
-            activityStatus = "recording"
+            activityStatus = presetStore.activeSettings.mode == "vad" ? "listening" : "recording"
         } else {
             activityStatus = "idle"
         }
