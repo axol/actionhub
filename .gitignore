@@ -14,3 +14,4 @@ build/
 local.properties
 *.keystore
 .idea/
+android/app/src/main/java/li/taurusag/actionhub/viewer/Secrets.kt
