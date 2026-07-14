@@ -101,11 +101,12 @@ Every privileged action from the viewer requires a fresh FIDO2 assertion from th
 (fingerprint UV) plugged into the viewer. The relay carries the messages; the mac holds all
 state and does all verification.
 
-Pairing (once): the viewer creates a credential on the key (`makeCredential`, one touch) and
-sends `{"type": "pair", "authenticator_data": <b64>}`. The mac parses the credential id and the
-COSE P-256 public key, prints the key fingerprint, and waits for `y`/`n` on the mac keyboard —
-the mac terminal is the trusted display. Accepted peers live in `~/.config/actionhub/peers.json`
-as `{credential_id: {public_key_pem, sign_count}}`.
+Pairing (once): a deliberate ceremony via `mac/pair.py`, never inside the running daemon. The
+viewer creates a credential on the key (`makeCredential`, one touch) and sends
+`{"type": "pair", "authenticator_data": <b64>}`. The ceremony parses the credential id and the
+COSE P-256 public key, prints the key fingerprint, and asks for confirmation — the mac terminal
+is the trusted display. Accepted peers live in `~/.config/actionhub/peers.json` as
+`{credential_id: {public_key_pem, sign_count}}`.
 
 Per action (challenge–response):
 
