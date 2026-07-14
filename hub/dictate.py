@@ -58,6 +58,7 @@ DISCONNECT_ALERT_INTERVAL_SECONDS = 15
 SPEAK_IDLE_SECONDS = 1.5
 
 DRAIN_TIMEOUT_SECONDS = 2.5
+PHONE_SEND_TIMEOUT_SECONDS = 6
 COMMIT_SENTINEL = object()
 
 VOICE_BASE_DIRECTORY = "/tmp/claude-voice"
@@ -88,6 +89,7 @@ status_bar_state = {
 }
 
 audio_state = {"owner": "phone"}
+phone_state = {"mode": "ptt", "buffer_count": 0}
 phone_link = {"connection": None}
 observed_lock = {"fingerprint": None, "fingerprint_time": 0.0, "hint_printed": False}
 pending_ack = {"text": None, "confirmed": True}
@@ -226,6 +228,10 @@ async def alert_unconfirmed_delivery():
 def emit_message(message_buffer):
     message_text = " ".join(message_buffer)
     message_buffer.clear()
+    emit_message_text(message_text)
+
+
+def emit_message_text(message_text):
     print("\n----- message -----")
     print(message_text)
     print("-------------------\n", flush=True)
@@ -233,6 +239,28 @@ def emit_message(message_buffer):
         play_sound(SEND_SOUND)
     else:
         play_sound(CANCEL_SOUND)
+
+
+def handle_phone_message(message_text, recording_state):
+    recording_state["pending_send"] = False
+    if audio_state["owner"] == "phone":
+        recording_state["recording"] = phone_state["mode"] == "vad"
+    if message_text.strip():
+        emit_message_text(message_text.strip())
+    else:
+        print("[nothing to send]", file=sys.stderr)
+    send_phone_state(recording_state)
+
+
+async def reset_unanswered_send(recording_state):
+    await asyncio.sleep(PHONE_SEND_TIMEOUT_SECONDS)
+    if not recording_state["pending_send"]:
+        return
+    recording_state["pending_send"] = False
+    if audio_state["owner"] == "phone":
+        recording_state["recording"] = phone_state["mode"] == "vad"
+    print("[phone send timed out]", file=sys.stderr)
+    send_phone_state(recording_state)
 
 
 def finalize_pending_send(message_buffer, recording_state):
@@ -343,10 +371,16 @@ async def consume_speak_requests(microphone_state, voice_activity_state, speech_
                 os.remove(file_path)
                 print("[channel ack]", file=sys.stderr)
                 continue
+            phone_push_to_talk_active = (
+                audio_state["owner"] == "phone"
+                and phone_state["mode"] == "ptt"
+                and recording_state["recording"]
+            )
             if (
-                (audio_state["owner"] == "phone" and recording_state["recording"])
+                phone_push_to_talk_active
                 or recording_state["pending_send"]
                 or message_buffer
+                or phone_state["buffer_count"]
                 or user_recently_spoke(voice_activity_state)
             ):
                 break
@@ -531,10 +565,14 @@ def queue_speak_request(text):
 def toggle_audio_owner(message_buffer, recording_state):
     if audio_state["owner"] == "mac":
         audio_state["owner"] = "phone"
-        recording_state["recording"] = False
+        recording_state["recording"] = phone_state["mode"] == "vad"
         recording_state["pending_send"] = False
-        play_sound(STOP_SOUND)
-        print("[phone audio]", file=sys.stderr)
+        if recording_state["recording"]:
+            play_sound(RECORD_SOUND)
+            print("[phone audio, listening]", file=sys.stderr)
+        else:
+            play_sound(STOP_SOUND)
+            print("[phone audio]", file=sys.stderr)
     else:
         audio_state["owner"] = "mac"
         recording_state["recording"] = True
@@ -558,7 +596,7 @@ def handle_remote_command(command, message_buffer, speech_state, playback_state,
     print(f"[{source}] {command}", file=sys.stderr)
     if source == "phone" and audio_state["owner"] == "mac":
         audio_state["owner"] = "phone"
-        recording_state["recording"] = False
+        recording_state["recording"] = phone_state["mode"] == "vad"
         print("[phone took audio]", file=sys.stderr)
     if command == "previousTrackCommand":
         if playback_state["active"]:
@@ -573,8 +611,12 @@ def handle_remote_command(command, message_buffer, speech_state, playback_state,
             if audio_state["owner"] == "mac":
                 print("[buffer discarded]", file=sys.stderr)
             else:
-                recording_state["recording"] = False
-                print("[recording discarded]", file=sys.stderr)
+                send_phone_message({"type": "discard"})
+                if phone_state["mode"] == "vad":
+                    print("[buffer discarded]", file=sys.stderr)
+                else:
+                    recording_state["recording"] = False
+                    print("[recording discarded]", file=sys.stderr)
         elif recording_state["pending_send"]:
             recording_state["pending_send"] = False
             message_buffer.clear()
@@ -583,6 +625,8 @@ def handle_remote_command(command, message_buffer, speech_state, playback_state,
                 recording_state["recording"] = True
                 print("[send cancelled, listening]", file=sys.stderr)
             else:
+                send_phone_message({"type": "discard"})
+                recording_state["recording"] = phone_state["mode"] == "vad"
                 print("[send cancelled]", file=sys.stderr)
         else:
             play_sound(STOP_SOUND)
@@ -597,7 +641,10 @@ def handle_remote_command(command, message_buffer, speech_state, playback_state,
         recording_state["pending_send"] = True
         request_transcript_commit(recording_state, audio_queue)
         print("[waiting for final transcript...]", file=sys.stderr)
-        asyncio.create_task(finalize_send_after_timeout(message_buffer, recording_state))
+        if audio_state["owner"] == "mac":
+            asyncio.create_task(finalize_send_after_timeout(message_buffer, recording_state))
+        else:
+            asyncio.create_task(reset_unanswered_send(recording_state))
     elif recording_state["pending_send"]:
         print("[already sending]", file=sys.stderr)
     else:
@@ -636,7 +683,10 @@ def render_status_bar():
     if recording_state["pending_send"]:
         activity = "sending"
     elif recording_state["recording"]:
-        activity = "listening" if audio_state["owner"] == "mac" else "RECORDING"
+        if audio_state["owner"] == "mac" or phone_state["mode"] == "vad":
+            activity = "listening"
+        else:
+            activity = "RECORDING"
     elif playback_state["active"]:
         activity = "speaking"
     else:
@@ -647,13 +697,17 @@ def render_status_bar():
     phone_marker = "●" if phone_present else "○"
     session_pid = status_bar_state["session_pid"]
     claude_marker = str(session_pid) if session_pid else "○"
+    if audio_state["owner"] == "mac":
+        buffer_count = len(status_bar_state["message_buffer"])
+    else:
+        buffer_count = phone_state["buffer_count"]
     segments = [
         f"audio {audio_state['owner']} {activity}",
         f"scribe {scribe_marker}",
         f"relay {relay_marker}",
         f"phone {phone_marker}",
         f"claude {claude_marker}",
-        f"buffer {len(status_bar_state['message_buffer'])}",
+        f"buffer {buffer_count}",
     ]
     line = " " + "  ·  ".join(segments)
     if status_bar_state["partial"]:
@@ -729,9 +783,20 @@ def handle_phone_event(phone_event, message_buffer, voice_activity_state, speech
             voice_activity_state["last_spoke"] = time.monotonic()
         if phone_event.get("kind") == "committed":
             clear_live_partial()
-            handle_committed_utterance(text, message_buffer, recording_state)
+            if text.strip():
+                print(f"[phone] {text.strip()}", file=sys.stderr)
         else:
             show_live_partial(text)
+    elif event_type == "config":
+        phone_state["mode"] = phone_event.get("mode", "ptt")
+        print(f"[phone mode] {phone_state['mode']}", file=sys.stderr)
+        if audio_state["owner"] == "phone" and not recording_state["pending_send"]:
+            recording_state["recording"] = phone_state["mode"] == "vad"
+            send_phone_state(recording_state)
+    elif event_type == "message":
+        handle_phone_message(phone_event.get("text", ""), recording_state)
+    elif event_type == "buffer":
+        phone_state["buffer_count"] = int(phone_event.get("count", 0))
     elif event_type == "playback":
         playback_state["active"] = bool(phone_event.get("active"))
 

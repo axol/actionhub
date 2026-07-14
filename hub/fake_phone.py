@@ -18,7 +18,11 @@ async def forward_keyboard(connection):
     event_loop = asyncio.get_running_loop()
     stdin_reader = asyncio.StreamReader()
     await event_loop.connect_read_pipe(lambda: asyncio.StreamReaderProtocol(stdin_reader), sys.stdin)
-    print("n=next  p=prev  u <text>=committed utterance  a <text>=partial  d=playback done", flush=True)
+    print(
+        "n=next  p=prev  u <text>=committed utterance  a <text>=partial  d=playback done  "
+        "c <ptt|vad>=config  m <text>=message  b <n>=buffer count",
+        flush=True,
+    )
     while True:
         line = (await stdin_reader.readline()).decode().strip()
         if line == "n":
@@ -31,6 +35,12 @@ async def forward_keyboard(connection):
             await connection.send(json.dumps({"type": "utterance", "kind": "partial", "text": line[2:]}))
         elif line == "d":
             await connection.send(json.dumps({"type": "playback", "active": False}))
+        elif line.startswith("c "):
+            await connection.send(json.dumps({"type": "config", "mode": line[2:]}))
+        elif line.startswith("m "):
+            await connection.send(json.dumps({"type": "message", "text": line[2:]}))
+        elif line.startswith("b "):
+            await connection.send(json.dumps({"type": "buffer", "count": int(line[2:])}))
 
 
 async def print_hub_messages(connection):

@@ -27,8 +27,15 @@ Phone → hub:
 
 - `{"type": "hello", "device": "<name>"}` — on connect
 - `{"type": "presence"}` — every 10s; keepalive and presence dot, nothing else
+- `{"type": "config", "mode": "ptt" | "vad"}` — on connect and whenever the active preset changes a
+  hub-shared setting; the hub interprets button semantics per mode
 - `{"type": "command", "command": "nextTrackCommand" | "previousTrackCommand" | ...}` — media buttons, exact MPRemoteCommand names
-- `{"type": "utterance", "kind": "partial" | "committed", "text": "..."}` — on-phone Scribe output
+- `{"type": "utterance", "kind": "partial" | "committed", "text": "..."}` — on-phone Scribe output,
+  display mirror only; the hub does not buffer these
+- `{"type": "buffer", "count": <n>}` — segment count of the phone-side transcript buffer, for the
+  hub status bar and speak gating
+- `{"type": "message", "text": "..."}` — the assembled message (surviving segments joined) at send
+  time; the hub delivers it to the Claude session verbatim
 - `{"type": "playback", "active": true | false}` — phone-side TTS playback state
 
 Hub → phone:
@@ -45,7 +52,22 @@ transcript — proof of injection. If nothing appears within 10s the hub plays `
 an `error` activity; a late injection still confirms with `delivered` afterwards.
 - `{"type": "speak", "text": "..."}` — phone fetches TTS from ElevenLabs and plays it
 - `{"type": "stop_playback"}` — abort phone-side TTS immediately
-- `{"type": "commit"}` — force a Scribe commit (drain before send)
+- `{"type": "commit"}` — start the send drain: phone forces a Scribe commit, waits for the final
+  committed segment (2.5s cap), then answers with `message`
+- `{"type": "discard"}` — clear the phone-side transcript buffer
+
+## Transcript buffer
+
+The transcript buffer lives with the audio owner. While the Mac owns audio, the hub accumulates
+committed utterances exactly as before. While the phone owns audio, the phone holds a list of
+segments (one per Scribe commit); each segment can be dropped on screen before sending, partials
+render live, and only the assembled surviving text crosses the wire as `message`. The hub mirrors
+the phone buffer for display (partials + `buffer` counts) but never owns it.
+
+Phone modes: `ptt` (recording toggled by buttons) and `vad` (always listening while the phone owns
+audio; the send button commits and sends, discard clears the buffer but keeps listening). Earcons,
+sound remapping, presets, button visibility, and the send phrase are phone-local settings and never
+reach the hub.
 
 ## Envelope layer (milestone 2, draft)
 
