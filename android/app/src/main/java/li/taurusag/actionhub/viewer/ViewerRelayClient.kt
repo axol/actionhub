@@ -21,10 +21,14 @@ class ViewerRelayClient(
     private var webSocket: WebSocket? = null
     private var presenceRunnable: Runnable? = null
 
+    fun send(payload: JSONObject) {
+        webSocket?.send(payload.toString())
+    }
+
     fun connect() {
         onStatus("connecting...")
         val request = Request.Builder()
-            .url("wss://relay.babelbase.com/?role=phone&room=actionhub&token=$relayToken")
+            .url("wss://relay.babelbase.com/?role=viewer&room=actionhub&token=$relayToken")
             .build()
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(openedSocket: WebSocket, response: Response) {

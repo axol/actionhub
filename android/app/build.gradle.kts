@@ -27,4 +27,6 @@ android {
 
 dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.yubico.yubikit:android:2.8.0")
+    implementation("com.yubico.yubikit:fido:2.8.0")
 }
