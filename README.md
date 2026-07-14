@@ -1,10 +1,10 @@
 # ActionHub
 
-Voice-first, screen-optional control of Claude Code sessions. One bridge on the Mac, paired devices, a dumb encrypted relay.
+Voice-first, screen-optional control of Claude Code sessions. A mac daemon, paired devices, a dumb encrypted relay.
 
 ## Structure
 
-- `bridge/` — Mac daemon (voice engine, session registry, transcript observer, routing)
+- `mac/` — Mac daemon (voice engine, session registry, transcript observer, routing)
 - `relay/` — Cloudflare Worker + Durable Object, blind message relay (`relay.babelbase.com`)
 - `ios/` — iPhone: on-device STT/TTS, media buttons, earcons; usable walking, in the car, anywhere
 - `android/` — Daylight DC1 viewer (read-only sessions, YubiKey-gated actions)
@@ -33,10 +33,10 @@ let elevenLabsApiKey = "$ELEVENLABS_API_KEY"
 EOF
 ```
 
-## Running the bridge
+## Running the mac daemon
 
 ```sh
-python3 bridge/dictate.py
+python3 mac/dictate.py
 ```
 
 Requires `ELEVENLABS_API_KEY` and `DICTATE_RELAY_TOKEN` in the environment.
@@ -50,8 +50,8 @@ so migrate deliberately: `wrangler delete` the old worker, `wrangler deploy` her
 
 ## Migration notes
 
-- `~/Downloads/claude/voice-engine/` is the frozen car-tested setup; `bridge/` is the canonical
-  evolving copy. Switch by running `bridge/dictate.py` instead.
+- `~/Downloads/claude/voice-engine/` is the frozen car-tested setup; `mac/` is the canonical
+  evolving copy. Switch by running `mac/dictate.py` instead.
 - The user-scope voice MCP registration still points at `~/Downloads/claude/voice-channel/channel.mjs`.
   Re-register when switching: `claude mcp add --scope user voice -- node ~/Coding/actionhub/channels/voice-channel/channel.mjs`
 - `~/Coding/dictate-remote/` (car remote iOS app) is fully superseded by `ios/` — the phone's
