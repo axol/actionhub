@@ -182,7 +182,7 @@ class MainActivity : Activity() {
                         )
                     )
                 )
-                appendTranscript("· pairing request sent, confirm on the mac (press y)")
+                appendTranscript("· pairing request sent, run mac/pair.py on the mac to confirm")
                 rescheduleLock()
             }
         }
