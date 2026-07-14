@@ -6,7 +6,7 @@ CANDIDATE_SAMPLE_RATES = (16000, 24000, 44100, 48000)
 SEND_PHRASES = ("the message is now complete",)
 COMMAND_MATCH_THRESHOLD = 0.8
 
-SOUNDS_DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+SOUNDS_DIRECTORY = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sounds")
 SEND_SOUND = os.path.join(SOUNDS_DIRECTORY, "sent.mp3")
 CANCEL_SOUND = "/System/Library/Sounds/Basso.aiff"
 TTS_START_SOUND = "/System/Library/Sounds/Pop.aiff"

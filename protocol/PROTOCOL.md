@@ -4,7 +4,7 @@
 
 - **relay** — the Cloudflare Worker + Durable Object at `relay.babelbase.com`. A dumb pipe: it
   forwards messages between roles in a room, decides nothing, sees (eventually) only ciphertext.
-- **mac** — `mac/mac_agent.py`. Delivers messages into Claude session inboxes,
+- **mac** — `mac/bin/mac_agent.py`. Delivers messages into Claude session inboxes,
   observes transcripts, plays Mac audio, runs the Mac VAD engine.
 - **phone** — the iOS app. Owns its own capture state machine, buffer, presets, and sounds.
 - **viewer** — the Daylight tablet (later milestone).
@@ -101,7 +101,7 @@ Every privileged action from the viewer requires a fresh FIDO2 assertion from th
 (fingerprint UV) plugged into the viewer. The relay carries the messages; the mac holds all
 state and does all verification.
 
-Pairing (once): a deliberate ceremony via `mac/pair.py`, never inside the running daemon. The
+Pairing (once): a deliberate ceremony via `mac/bin/pair.py`, never inside the running daemon. The
 viewer creates a credential on the key (`makeCredential`, one touch) and sends
 `{"type": "pair", "authenticator_data": <b64>}`. The ceremony parses the credential id and the
 COSE P-256 public key, prints the key fingerprint, and asks for confirmation — the mac terminal

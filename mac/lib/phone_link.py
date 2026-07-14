@@ -51,7 +51,7 @@ def handle_phone_event(phone_event, voice_activity_state, playback_state, record
     elif event_type == "message":
         control.handle_phone_message(phone_event.get("text", ""))
     elif event_type == "pair":
-        print("[pairing request received — run mac/pair.py for the pairing ceremony]", file=sys.stderr)
+        print("[pairing request received — run mac/bin/pair.py for the pairing ceremony]", file=sys.stderr)
     elif event_type == "challenge_request":
         verification.issue_challenge()
     elif event_type == "action":
