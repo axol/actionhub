@@ -74,10 +74,14 @@ class MainActivity : Activity() {
         val pingButton = Button(this)
         pingButton.text = "signed ping"
         pingButton.setOnClickListener { startSignedAction() }
+        val lockButton = Button(this)
+        lockButton.text = "lock"
+        lockButton.setOnClickListener { lockNow() }
         val buttonRow = LinearLayout(this)
         buttonRow.orientation = LinearLayout.HORIZONTAL
         buttonRow.addView(pairButton)
         buttonRow.addView(pingButton)
+        buttonRow.addView(lockButton)
         val mainLayout = LinearLayout(this)
         mainLayout.orientation = LinearLayout.VERTICAL
         mainLayout.setPadding(48, 48, 48, 48)
@@ -121,6 +125,15 @@ class MainActivity : Activity() {
 
     private fun engageLock() {
         lockLayout.visibility = LinearLayout.VISIBLE
+    }
+
+    private fun lockNow() {
+        if (storedCredentialId() == null) {
+            appendTranscript("✗ pair first, otherwise the lock has no key")
+            return
+        }
+        mainHandler.removeCallbacks(lockRunnable)
+        engageLock()
     }
 
     private fun attemptUnlock() {
