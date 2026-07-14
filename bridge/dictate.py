@@ -72,6 +72,7 @@ TTS_CHUNK_BYTES = 4800
 
 STATUS_REFRESH_SECONDS = 0.25
 SESSION_CHECK_INTERVAL_SECONDS = 2.0
+STATUS_BAR_ROWS = 3
 
 PHONE_PRESENCE_TIMEOUT_SECONDS = 25
 
@@ -651,19 +652,34 @@ def render_status_bar():
         f"claude {claude_marker}",
         f"buffer {buffer_count}",
     ]
-    line = " " + "  ·  ".join(segments)
-    if status_bar_state["partial"]:
-        line += f"  ·  … {status_bar_state['partial']}"
+    status_line = " " + "  ·  ".join(segments)
     columns, rows = shutil.get_terminal_size()
-    if len(line) > columns:
-        line = line[:columns - 1] + "…"
-    sys.stderr.write(f"\0337\033[{rows};1H\033[7m{line.ljust(columns)}\033[0m\0338")
+    if len(status_line) > columns:
+        status_line = status_line[:columns - 1] + "…"
+    partial_lines = wrap_partial_lines(columns)
+    first_row = rows - STATUS_BAR_ROWS + 1
+    output = f"\0337\033[{first_row};1H\033[7m{status_line.ljust(columns)}\033[0m"
+    for row_offset in range(1, STATUS_BAR_ROWS):
+        partial_line = partial_lines[row_offset - 1] if row_offset - 1 < len(partial_lines) else ""
+        output += f"\033[{first_row + row_offset};1H\033[2m{partial_line.ljust(columns)}\033[0m"
+    sys.stderr.write(output + "\0338")
     sys.stderr.flush()
+
+
+def wrap_partial_lines(columns):
+    if not status_bar_state["partial"]:
+        return []
+    partial_text = f"… {status_bar_state['partial']}"
+    chunk_width = max(columns - 1, 10)
+    chunks = [partial_text[start:start + chunk_width] for start in range(0, len(partial_text), chunk_width)]
+    return chunks[-(STATUS_BAR_ROWS - 1):]
 
 
 def apply_scroll_region():
     columns, rows = shutil.get_terminal_size()
-    sys.stderr.write(f"\033[{rows};1H\033[K\033[1;{rows - 1}r\033[{rows - 1};1H")
+    top_of_bar = rows - STATUS_BAR_ROWS + 1
+    clear_bar_rows = "".join(f"\033[{row};1H\033[K" for row in range(top_of_bar, rows + 1))
+    sys.stderr.write(f"{clear_bar_rows}\033[1;{top_of_bar - 1}r\033[{top_of_bar - 1};1H")
     sys.stderr.flush()
 
 
@@ -672,7 +688,9 @@ def teardown_status_bar():
         return
     status_bar_state["enabled"] = False
     columns, rows = shutil.get_terminal_size()
-    sys.stderr.write(f"\033[r\033[{rows};1H\033[K")
+    top_of_bar = rows - STATUS_BAR_ROWS + 1
+    clear_bar_rows = "".join(f"\033[{row};1H\033[K" for row in range(top_of_bar, rows + 1))
+    sys.stderr.write(f"\033[r{clear_bar_rows}")
     sys.stderr.flush()
 
 
