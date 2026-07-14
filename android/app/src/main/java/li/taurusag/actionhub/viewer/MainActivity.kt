@@ -52,7 +52,11 @@ class MainActivity : Activity() {
             onEvent = { payload -> renderEvent(payload) },
         )
         relayClient.connect()
-        rescheduleLock()
+        if (storedCredentialId() != null) {
+            engageLock()
+        } else {
+            rescheduleLock()
+        }
     }
 
     private fun buildLayout(): FrameLayout {
@@ -276,6 +280,14 @@ class MainActivity : Activity() {
             transcriptView.text = transcriptText.subSequence(transcriptText.length / 2, transcriptText.length)
         }
         scrollView.post { scrollView.fullScroll(ScrollView.FOCUS_DOWN) }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (storedCredentialId() != null) {
+            mainHandler.removeCallbacks(lockRunnable)
+            engageLock()
+        }
     }
 
     override fun onDestroy() {
