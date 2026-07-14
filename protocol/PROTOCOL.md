@@ -4,7 +4,7 @@
 
 - **relay** — the Cloudflare Worker + Durable Object at `relay.babelbase.com`. A dumb pipe: it
   forwards messages between roles in a room, decides nothing, sees (eventually) only ciphertext.
-- **mac** — `mac/dictate.py`. Delivers messages into Claude session inboxes,
+- **mac** — `mac/mac_agent.py`. Delivers messages into Claude session inboxes,
   observes transcripts, plays Mac audio, runs the Mac VAD engine.
 - **phone** — the iOS app. Owns its own capture state machine, buffer, presets, and sounds.
 - **viewer** — the Daylight tablet (later milestone).

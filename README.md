@@ -36,7 +36,7 @@ EOF
 ## Running the mac daemon
 
 ```sh
-python3 mac/dictate.py
+mac/mac_agent.py
 ```
 
 Requires `ELEVENLABS_API_KEY` and `DICTATE_RELAY_TOKEN` in the environment.
@@ -62,7 +62,7 @@ requires a fresh YubiKey fingerprint assertion verified by the daemon.
 ## Migration notes
 
 - `~/Downloads/claude/voice-engine/` is the frozen car-tested setup; `mac/` is the canonical
-  evolving copy. Switch by running `mac/dictate.py` instead.
+  evolving copy. Switch by running `mac/mac_agent.py` instead.
 - The user-scope voice MCP registration still points at `~/Downloads/claude/voice-channel/channel.mjs`.
   Re-register when switching: `claude mcp add --scope user voice -- node ~/Coding/actionhub/channels/voice-channel/channel.mjs`
 - `~/Coding/dictate-remote/` (car remote iOS app) is fully superseded by `ios/` — the phone's
