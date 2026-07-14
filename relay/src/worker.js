@@ -22,7 +22,9 @@ export class RelayHub {
     const senderRole = this.ctx.getTags(socket)[0]
     for (const otherSocket of this.ctx.getWebSockets()) {
       if (otherSocket === socket) continue
-      if (this.ctx.getTags(otherSocket)[0] === senderRole) continue
+      const receiverRole = this.ctx.getTags(otherSocket)[0]
+      if (receiverRole === senderRole) continue
+      if (senderRole === 'viewer' && receiverRole !== 'mac') continue
       try { otherSocket.send(message) } catch {}
     }
   }
@@ -38,7 +40,7 @@ export default {
       return new Response('unauthorized', { status: 401 })
     }
     const role = url.searchParams.get('role')
-    if (role !== 'phone' && role !== 'mac') {
+    if (role !== 'phone' && role !== 'mac' && role !== 'viewer') {
       return new Response('bad role', { status: 400 })
     }
     const room = url.searchParams.get('room') || 'default'
