@@ -32,9 +32,8 @@ final class PhoneController: NSObject, ObservableObject {
     private let microphoneGate = MicrophoneGate()
     private var silentPlayer: AVAudioPlayer?
     private var recording = false
-    private var pendingSend = false
+    private var sending = false
     private var speaking = false
-    private var awaitingCommitForSend = false
     private var sendDrainTimeoutWorkItem: DispatchWorkItem?
     private var eventCounter = 0
     private var started = false
@@ -57,6 +56,134 @@ final class PhoneController: NSObject, ObservableObject {
         publishNowPlaying()
         relayClient.connect()
         scribeStream.start()
+        applyCaptureState()
+    }
+
+    func primaryAction() {
+        appendLog("primary")
+        if audioOwner != "phone" {
+            takeAudio()
+            startListening()
+            return
+        }
+        if sending { return }
+        if recording {
+            beginSend()
+        } else {
+            startListening()
+        }
+    }
+
+    func secondaryAction() {
+        appendLog("secondary")
+        if audioOwner != "phone" {
+            takeAudio()
+            applyCaptureState()
+            return
+        }
+        if speaking {
+            audioPipeline.stopSpeaking()
+            startListening()
+            return
+        }
+        if sending {
+            cancelSend()
+            return
+        }
+        if recording || !transcriptBuffer.isEmpty {
+            discard()
+        }
+    }
+
+    private func takeAudio() {
+        audioOwner = "phone"
+        microphoneGate.phoneOwnsAudio = true
+        relayClient.send(["type": "take_audio"])
+        scribeStream.start()
+        appendLog("took audio")
+    }
+
+    private func startListening() {
+        guard !recording else { return }
+        recording = true
+        microphoneGate.recording = true
+        playLocalSound("record")
+        refreshActivityStatus()
+        sendStatus()
+    }
+
+    private func stopListening() {
+        guard recording else { return }
+        recording = false
+        microphoneGate.recording = false
+        refreshActivityStatus()
+        sendStatus()
+    }
+
+    private func discard() {
+        transcriptBuffer.clear()
+        playLocalSound("stop")
+        if presetStore.activeSettings.mode == "ptt" {
+            stopListening()
+        }
+        refreshActivityStatus()
+        sendStatus()
+    }
+
+    private func beginSend() {
+        sending = true
+        microphoneGate.recording = false
+        refreshActivityStatus()
+        sendStatus()
+        scribeStream.commit()
+        let timeoutWorkItem = DispatchWorkItem { [weak self] in
+            self?.completeSend()
+        }
+        sendDrainTimeoutWorkItem = timeoutWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.sendDrainTimeoutSeconds, execute: timeoutWorkItem)
+        if transcriptBuffer.livePartial.isEmpty {
+            completeSend()
+        }
+    }
+
+    private func completeSend() {
+        guard sending else { return }
+        dispatchAssembledMessage()
+    }
+
+    private func cancelSend() {
+        sending = false
+        sendDrainTimeoutWorkItem?.cancel()
+        sendDrainTimeoutWorkItem = nil
+        transcriptBuffer.clear()
+        playLocalSound("stop")
+        appendLog("send cancelled")
+        applyCaptureState()
+        refreshActivityStatus()
+        sendStatus()
+    }
+
+    private func dispatchAssembledMessage() {
+        sending = false
+        sendDrainTimeoutWorkItem?.cancel()
+        sendDrainTimeoutWorkItem = nil
+        relayClient.send(["type": "message", "text": transcriptBuffer.assembledText])
+        transcriptBuffer.clear()
+        recording = false
+        microphoneGate.recording = false
+        applyCaptureState()
+        refreshActivityStatus()
+        sendStatus()
+    }
+
+    private func applyCaptureState() {
+        guard audioOwner == "phone", !sending else { return }
+        let shouldListen = presetStore.activeSettings.mode == "vad"
+        if shouldListen && !recording {
+            startListening()
+        } else if !shouldListen && recording {
+            stopListening()
+        }
     }
 
     private func wireRelay() {
@@ -66,10 +193,10 @@ final class PhoneController: NSObject, ObservableObject {
         relayClient.onOpen = { [weak self] in
             guard let self else { return }
             relayClient.send(["type": "hello", "device": UIDevice.current.name])
-            sendConfig()
+            sendStatus()
         }
         relayClient.onMessage = { [weak self] payload in
-            self?.handleHubMessage(payload)
+            self?.handleBridgeMessage(payload)
         }
     }
 
@@ -114,18 +241,26 @@ final class PhoneController: NSObject, ObservableObject {
             self?.objectWillChange.send()
         }
         presetStore.onSharedSettingsChange = { [weak self] in
-            self?.sendConfig()
+            guard let self else { return }
+            applyCaptureState()
+            sendStatus()
         }
     }
 
     private func wireTranscriptBuffer() {
-        transcriptBuffer.onSegmentCountChange = { [weak self] segmentCount in
-            self?.relayClient.send(["type": "buffer", "count": segmentCount])
+        transcriptBuffer.onSegmentCountChange = { [weak self] _ in
+            self?.sendStatus()
         }
     }
 
-    private func sendConfig() {
-        relayClient.send(["type": "config", "mode": presetStore.activeSettings.mode])
+    private func sendStatus() {
+        relayClient.send([
+            "type": "status",
+            "recording": recording,
+            "sending": sending,
+            "buffer": transcriptBuffer.segments.count,
+            "mode": presetStore.activeSettings.mode,
+        ])
     }
 
     private func handleCommittedTranscript(_ text: String) {
@@ -136,33 +271,16 @@ final class PhoneController: NSObject, ObservableObject {
             appendLog("committed: \(trimmedText)")
         }
         if presetStore.activeSettings.sendPhraseEnabled && Self.matchesSendPhrase(trimmedText) {
-            completeSend()
+            dispatchAssembledMessage()
             return
         }
-        transcriptBuffer.appendCommitted(trimmedText)
-        if awaitingCommitForSend {
+        if !trimmedText.isEmpty {
+            transcriptBuffer.appendCommitted(trimmedText)
+            playLocalSound("click")
+        }
+        if sending {
             completeSend()
         }
-    }
-
-    private func beginSendDrain() {
-        awaitingCommitForSend = true
-        let timeoutWorkItem = DispatchWorkItem { [weak self] in
-            self?.completeSend()
-        }
-        sendDrainTimeoutWorkItem = timeoutWorkItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.sendDrainTimeoutSeconds, execute: timeoutWorkItem)
-        if transcriptBuffer.livePartial.isEmpty {
-            completeSend()
-        }
-    }
-
-    private func completeSend() {
-        awaitingCommitForSend = false
-        sendDrainTimeoutWorkItem?.cancel()
-        sendDrainTimeoutWorkItem = nil
-        relayClient.send(["type": "message", "text": transcriptBuffer.assembledText])
-        transcriptBuffer.clear()
     }
 
     private static func matchesSendPhrase(_ text: String) -> Bool {
@@ -199,33 +317,30 @@ final class PhoneController: NSObject, ObservableObject {
         return 1 - editDistance / maximumLength
     }
 
-    private func handleHubMessage(_ payload: [String: Any]) {
+    private func handleBridgeMessage(_ payload: [String: Any]) {
         switch payload["type"] as? String {
         case "state":
-            recording = payload["recording"] as? Bool ?? false
-            pendingSend = payload["pending_send"] as? Bool ?? false
             let owner = payload["audio"] as? String ?? "phone"
             if owner != audioOwner {
                 audioOwner = owner
                 appendLog("audio owner: \(owner)")
+                microphoneGate.phoneOwnsAudio = owner == "phone"
                 if owner == "phone" {
                     scribeStream.start()
+                    applyCaptureState()
                 } else {
+                    stopListening()
                     scribeStream.stop()
                 }
             }
-            microphoneGate.phoneOwnsAudio = owner == "phone"
-            microphoneGate.recording = recording
             refreshActivityStatus()
         case "activity":
             if let text = payload["text"] as? String {
                 appendLog("claude: \(text)")
             }
         case "sound":
-            if let eventName = payload["name"] as? String,
-               let soundName = presetStore.activeSettings.soundName(for: eventName),
-               let soundUrl = soundLibrary.url(for: soundName) {
-                soundPlayer.play(soundUrl)
+            if let eventName = payload["name"] as? String {
+                playLocalSound(eventName)
             }
         case "speak":
             if let text = payload["text"] as? String {
@@ -238,18 +353,19 @@ final class PhoneController: NSObject, ObservableObject {
             }
         case "stop_playback":
             audioPipeline.stopSpeaking()
-        case "commit":
-            scribeStream.commit()
-            beginSendDrain()
-        case "discard":
-            transcriptBuffer.clear()
         default:
             break
         }
     }
 
+    private func playLocalSound(_ eventName: String) {
+        guard let soundName = presetStore.activeSettings.soundName(for: eventName),
+              let soundUrl = soundLibrary.url(for: soundName) else { return }
+        soundPlayer.play(soundUrl)
+    }
+
     private func refreshActivityStatus() {
-        if pendingSend {
+        if sending {
             activityStatus = "sending"
         } else if speaking {
             activityStatus = "speaking"
@@ -312,16 +428,22 @@ final class PhoneController: NSObject, ObservableObject {
         registerCommand(commandCenter.seekBackwardCommand, named: "seekBackwardCommand")
     }
 
-    func sendCommand(_ commandName: String) {
-        appendLog(commandName)
-        relayClient.send(["type": "command", "command": commandName])
+    private func handleMediaCommand(_ commandName: String) {
+        switch commandName {
+        case "nextTrackCommand":
+            primaryAction()
+        case "previousTrackCommand":
+            secondaryAction()
+        default:
+            appendLog(commandName)
+        }
     }
 
     private func registerCommand(_ command: MPRemoteCommand, named commandName: String) {
         command.isEnabled = true
         command.addTarget { [weak self] _ in
             DispatchQueue.main.async {
-                self?.sendCommand(commandName)
+                self?.handleMediaCommand(commandName)
             }
             return .success
         }

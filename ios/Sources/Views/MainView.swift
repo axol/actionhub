@@ -9,8 +9,8 @@ struct MainView: View {
                 mainPageSettings
                 statusHeader
                 TranscriptView(transcriptBuffer: phoneController.transcriptBuffer)
-                controlButtons
                 EventLogView(eventLog: phoneController.eventLog)
+                controlButtons
             }
             .padding()
             .navigationTitle(phoneController.presetStore.activePreset.name)
@@ -82,7 +82,7 @@ struct MainView: View {
         return HStack(spacing: 16) {
             if settings.showDiscardButton {
                 Button {
-                    phoneController.sendCommand("previousTrackCommand")
+                    phoneController.secondaryAction()
                 } label: {
                     Image(systemName: "xmark")
                         .font(.title)
@@ -92,7 +92,7 @@ struct MainView: View {
             }
             if settings.showSendButton {
                 Button {
-                    phoneController.sendCommand("nextTrackCommand")
+                    phoneController.primaryAction()
                 } label: {
                     Image(systemName: sendButtonIcon)
                         .font(.title)

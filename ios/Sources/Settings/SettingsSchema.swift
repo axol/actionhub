@@ -26,7 +26,7 @@ enum SettingsSchema {
             kind: .toggle,
             defaultValue: .flag(true),
             scope: .phoneOnly,
-            showableOnMain: true
+            showableOnMain: false
         ),
         SettingDefinition(
             key: "showSendButton",
@@ -34,7 +34,7 @@ enum SettingsSchema {
             kind: .toggle,
             defaultValue: .flag(true),
             scope: .phoneOnly,
-            showableOnMain: true
+            showableOnMain: false
         ),
         SettingDefinition(
             key: "soundMap",

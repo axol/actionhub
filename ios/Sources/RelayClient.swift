@@ -11,7 +11,7 @@ final class RelayClient: NSObject, URLSessionWebSocketDelegate {
 
     func connect() {
         guard webSocketTask == nil else { return }
-        guard let relayUrl = URL(string: "wss://relay.babelbase.com/?role=phone&room=hub&token=\(relayToken)") else { return }
+        guard let relayUrl = URL(string: "wss://relay.babelbase.com/?role=phone&room=actionhub&token=\(relayToken)") else { return }
         let task = urlSession.webSocketTask(with: relayUrl)
         webSocketTask = task
         onStatusChange?("relay: connecting...")
