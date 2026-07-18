@@ -4,6 +4,7 @@ __pycache__/
 .wrangler/
 .dev.vars
 .relay-token
+.secrets/
 Secrets.swift
 secrets.properties
 *.xcodeproj/
