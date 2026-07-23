@@ -28,7 +28,7 @@ class ViewerRelayClient(
     fun connect() {
         onStatus("connecting...")
         val request = Request.Builder()
-            .url("wss://relay.babelbase.com/?role=viewer&room=actionhub&token=$relayToken")
+            .url("wss://actionhub.app/?role=viewer&room=actionhub&token=$relayToken")
             .build()
         webSocket = httpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(openedSocket: WebSocket, response: Response) {

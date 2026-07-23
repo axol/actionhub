@@ -16,7 +16,7 @@ from peers import load_peers, parse_pairing_data, save_peers
 
 async def pair():
     relay_token = os.environ["DICTATE_RELAY_TOKEN"]
-    relay_url = f"wss://relay.babelbase.com/?role=mac&room=actionhub&token={relay_token}"
+    relay_url = f"wss://actionhub.app/?role=mac&room=actionhub&token={relay_token}"
     async with websockets.connect(relay_url) as relay_connection:
         print("waiting for a pairing request — press pair on the viewer")
         async for raw_message in relay_connection:
