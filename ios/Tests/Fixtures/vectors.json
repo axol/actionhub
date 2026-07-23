@@ -1,0 +1,16 @@
+{
+  "hmac_key": "fixture-hmac-key",
+  "phone_seed": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+  "phone_public_key": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w=",
+  "agent_seed": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=",
+  "agent_public_key": "gTl3Dqh9F19Wo1Rmw0x+zMuNipG07jeiXfYPW4/Js5Q=",
+  "channel_id": "994b6b7fce5174251ddd18882bfd6bcc209424ae81117cc483fb15425c06d9f1",
+  "request_id": "0409a2b85ba76e7ae1d7158314ea749da18026a9937c980c81c06577db0898ea",
+  "request_payload_json": "{\"envelope_type\":\"request\",\"type\":\"action\",\"nonce\":\"deadbeefdeadbeef\",\"title\":\"Ship the relay?\",\"body\":{\"content_type\":\"html\",\"content\":\"<h1>Ship the relay?</h1><p>Deploy MessageStore to production — yes/no?</p>\"},\"buttons\":[{\"label\":\"Ship it\",\"value\":\"ship\"},{\"label\":\"Hold\",\"value\":\"hold\"}]}",
+  "request_blob": "3yhZn20Sj0XghAWBiVfY3Gn+g5pLP/GX33UkS2HpjAWnFapPdg7Gatow3sJ1ME3yHK/7684A4tnNy+c2RR11b7Oey9mme/0KuHxG/EIkpmTQo4FTabXAcGUBalqL3aZ/Lb2w/tii2ATBeEUF6KNQNL11ubv+M4J4/9FR/yqffmMm93n0YP7LxhM7g0oBJ/mk+O2BJF45pgjyw1/FQE1jIPb4EYe/mHX4WVxsktDCwaxpJTMGZ9ovkmFDX39jDSNxC+1LlJYLP6iNPmWywE5EY6R0QxfuLfWk70ElddOcTbBk1XgjNM9PZVXD3t4NJgI8fMEWn1ljM2YK7vsGvlYkpcImdqlQkMEcQ//LOp3cGDZ0ZFaxJzsUdsiXkZgUOsBXsHk4Y7+1dB/OHZWtVjN7aqjwc/SuaCEQgNmyHUsdy1A3XCIMTvjA45dIu/i532O3zuyK3EFCjceHS0X//3OWvREtQqZo3XgQK8JO9pkQoYvTZ6Qe0lJCXSbcVbx/SxYBBC7FlK4gJRYYVd0w5jOTiVbkeTnupzH4jsSiV+DvyZqD3amb0hH+P+hYQIR54Jj/NaAvGfaYGym5izZ9mDZ0ustFXzgCr/baRNmpFy3T0DwzQemuLirPT47OLDMgXSXjf7wZO7USEe2LllwV3gZJhJvxOCPkZTcHq80bRQpB3ZJUpJewGETJmpouB5GmpCkrrt4UEsvV8PM4jeFdVxB7/XYAcgUbkoCaWk+DPh1JXkuYFvSkR8OC8VGUfzleWULr80O6jqI4HT/S16p9VRXDF2JA75Qp/iWf7+AN",
+  "signature_probe_message": "probe-payload-bytes",
+  "phone_probe_signature": "QJ5fYNgkhQOo9vqHu/3AWRkYvJ77KdiWwLbC7PVvBTryowPDJ2pBCwQqqu1y9mr0GSV23j7HRc07oWVwaWFdAQ==",
+  "biometric_public_key": "BACZAU1ECJ2LQPaCm5aIGpa7wOTUkd02Jz5CVJh9k3OVkqWyDklnk22w9tUxsm+LdIQCuoxOJ0ONspiaMB+ngwI=",
+  "biometric_message": "actionhub-biometric-v1\n0409a2b85ba76e7ae1d7158314ea749da18026a9937c980c81c06577db0898ea\nship\n1702500000000\n",
+  "biometric_signature": "MEYCIQDIzA4zlNt94W3jw30VeSbg5TpxON6PQ6sbDoaaGDbb5wIhAPiLErmXknMFU9WAO0F1CgMkNrUaycIq48mMV2w9vk9e"
+}
