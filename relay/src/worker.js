@@ -121,25 +121,26 @@ export class MessageStore {
 
   async pollChannel(channel) {
     if (!isHexId(channel)) return json({ error: 'channel required' }, 400)
-    const pending = await this.oldestUnansweredMessage(channel)
-    if (pending) return json(publicFields(pending))
+    const pending = await this.unansweredMessages(channel)
+    if (pending.length) return json(pending.map(publicFields))
     const record = await new Promise((resolve) => {
       const waiters = this.channelWaiters.get(channel) || []
       waiters.push(resolve)
       this.channelWaiters.set(channel, waiters)
       setTimeout(() => resolve(null), POLL_TIMEOUT_MILLISECONDS)
     })
-    if (record) return json(publicFields(record))
+    if (record) return json([publicFields(record)])
     return new Response(null, { status: 204 })
   }
 
-  async oldestUnansweredMessage(channel) {
+  async unansweredMessages(channel) {
     const index = await this.ctx.storage.list({ prefix: `c:${channel}:` })
+    const records = []
     for (const id of index.values()) {
       const record = await this.ctx.storage.get(messageKey(id))
-      if (record && !record.response_blob) return record
+      if (record && !record.response_blob) records.push(record)
     }
-    return null
+    return records
   }
 
   async deleteMessage(id, request) {
