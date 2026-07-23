@@ -7,11 +7,13 @@
   ],
   "durable_objects": {
     "bindings": [
-      { "name": "RELAY_HUB", "class_name": "RelayHub" }
+      { "name": "RELAY_HUB", "class_name": "RelayHub" },
+      { "name": "MESSAGE_STORE", "class_name": "MessageStore" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["RelayHub"] }
+    { "tag": "v1", "new_sqlite_classes": ["RelayHub"] },
+    { "tag": "v2", "new_sqlite_classes": ["MessageStore"] }
   ],
   "observability": { "enabled": true }
 }
