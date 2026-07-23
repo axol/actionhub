@@ -36,11 +36,15 @@ export class MessageStore {
   constructor(ctx) {
     this.ctx = ctx
     this.pollWaiters = new Map()
+    this.channelWaiters = new Map()
   }
 
   async fetch(request) {
     const url = new URL(request.url)
     const segments = url.pathname.split('/').filter(Boolean)
+    if (segments[0] === 'channels' && segments.length === 3 && segments[2] === 'poll' && request.method === 'GET') {
+      return this.pollChannel(segments[1])
+    }
     if (segments[0] !== 'messages') return json({ error: 'not found' }, 404)
 
     if (segments.length === 1 && request.method === 'POST') return this.createMessage(request)
@@ -63,6 +67,8 @@ export class MessageStore {
     const record = { id, channel, request_blob, deletion_key, response_blob: null, created_at: Date.now() }
     await this.ctx.storage.put(messageKey(id), record)
     await this.ctx.storage.put(channelKey(channel, record.created_at, id), id)
+    for (const resolve of this.channelWaiters.get(channel) || []) resolve(record)
+    this.channelWaiters.delete(channel)
     return json({ id }, 201)
   }
 
@@ -113,6 +119,29 @@ export class MessageStore {
     return new Response(null, { status: 204 })
   }
 
+  async pollChannel(channel) {
+    if (!isHexId(channel)) return json({ error: 'channel required' }, 400)
+    const pending = await this.oldestUnansweredMessage(channel)
+    if (pending) return json(publicFields(pending))
+    const record = await new Promise((resolve) => {
+      const waiters = this.channelWaiters.get(channel) || []
+      waiters.push(resolve)
+      this.channelWaiters.set(channel, waiters)
+      setTimeout(() => resolve(null), POLL_TIMEOUT_MILLISECONDS)
+    })
+    if (record) return json(publicFields(record))
+    return new Response(null, { status: 204 })
+  }
+
+  async oldestUnansweredMessage(channel) {
+    const index = await this.ctx.storage.list({ prefix: `c:${channel}:` })
+    for (const id of index.values()) {
+      const record = await this.ctx.storage.get(messageKey(id))
+      if (record && !record.response_blob) return record
+    }
+    return null
+  }
+
   async deleteMessage(id, request) {
     const body = await readJson(request)
     if (!body || typeof body.deletion_key !== 'string') return json({ error: 'deletion_key required' }, 400)
@@ -156,7 +185,7 @@ async function readJson(request) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url)
-    if (url.pathname === '/messages' || url.pathname.startsWith('/messages/')) {
+    if (url.pathname === '/messages' || url.pathname.startsWith('/messages/') || url.pathname.startsWith('/channels/')) {
       const store = env.MESSAGE_STORE.get(env.MESSAGE_STORE.idFromName('messages'))
       return store.fetch(request)
     }

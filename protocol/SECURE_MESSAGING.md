@@ -139,6 +139,7 @@ No token; the channel id is the bearer.
 | `GET /messages/<id>` | — | `{id, request_blob, response_blob, created_at}` or `404` |
 | `PATCH /messages/<id>` | `{response_blob}` | `200`, `409` if already responded |
 | `GET /messages/<id>/poll` | — | `200 {response_blob}` or `204` after ~50s |
+| `GET /channels/<id>/poll` | — | oldest unanswered message or `204` after ~50s |
 | `DELETE /messages/<id>` | `{deletion_key}` | `200`, `403` wrong key, `404` gone |
 
 `created_at` is relay-assigned epoch milliseconds. A message accepts exactly one
