@@ -2,7 +2,7 @@
 
 ## Terms
 
-- **relay** — the Cloudflare Worker + Durable Object at `relay.babelbase.com`. A dumb pipe: it
+- **relay** — the Cloudflare Worker + Durable Object at `actionhub.app`. A dumb pipe: it
   forwards messages between roles in a room, decides nothing, sees (eventually) only ciphertext.
 - **mac** — `mac/bin/mac_agent.py`. Delivers messages into Claude session inboxes,
   observes transcripts, plays Mac audio, runs the Mac VAD engine.
