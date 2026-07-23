@@ -1,0 +1,97 @@
+#!/usr/bin/env node
+import { readdirSync, readFileSync, writeFileSync, renameSync, existsSync, rmSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+
+const baseDirectory = '/tmp/claude-grunt'
+const registryDirectory = join(baseDirectory, 'registry')
+
+const isProcessAlive = (processId) => {
+  try {
+    process.kill(processId, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const loadRegistry = () => {
+  if (!existsSync(registryDirectory)) return []
+  return readdirSync(registryDirectory)
+    .map((fileName) => {
+      try {
+        return JSON.parse(readFileSync(join(registryDirectory, fileName), 'utf8'))
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+    .filter((entry) => {
+      if (isProcessAlive(entry.claudeProcessId)) return true
+      rmSync(join(registryDirectory, `${entry.claudeProcessId}.json`), { force: true })
+      return false
+    })
+}
+
+const readMessageFromStdin = () => {
+  try {
+    return readFileSync(0, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+const argumentList = process.argv.slice(2)
+const messageParts = []
+let targetProcessId = null
+let targetDirectory = null
+let listRequested = false
+
+for (let index = 0; index < argumentList.length; index++) {
+  const argument = argumentList[index]
+  if (argument === '--list') listRequested = true
+  else if (argument === '--pid') targetProcessId = Number(argumentList[++index])
+  else if (argument === '--cwd') targetDirectory = resolve(argumentList[++index])
+  else messageParts.push(argument)
+}
+
+const liveEntries = loadRegistry()
+
+if (listRequested) {
+  console.log(JSON.stringify(liveEntries, null, 2))
+  process.exit(0)
+}
+
+const message = messageParts.length > 0 ? messageParts.join(' ') : readMessageFromStdin()
+
+if (!message.trim()) {
+  console.error('usage: grunt-send [--pid <claude-pid> | --cwd <project-dir>] <message>')
+  console.error('       command | grunt-send [--pid <claude-pid> | --cwd <project-dir>]')
+  console.error('       grunt-send --list')
+  process.exit(1)
+}
+
+let matchingEntries
+if (targetProcessId) {
+  matchingEntries = liveEntries.filter((entry) => entry.claudeProcessId === targetProcessId)
+} else {
+  const routingDirectory = targetDirectory ?? resolve(process.cwd())
+  matchingEntries = liveEntries.filter((entry) => resolve(entry.workingDirectory) === routingDirectory)
+}
+
+if (matchingEntries.length === 0) {
+  console.error(`no live claude session matches; running sessions: ${JSON.stringify(liveEntries)}`)
+  process.exit(1)
+}
+
+if (matchingEntries.length > 1) {
+  console.error(`ambiguous, multiple sessions in this directory, pick one with --pid: ${JSON.stringify(matchingEntries)}`)
+  process.exit(1)
+}
+
+const [targetEntry] = matchingEntries
+const fileName = `message-${Date.now()}-${process.pid}.txt`
+const temporaryPath = join(targetEntry.inboxDirectory, `.${fileName}`)
+const finalPath = join(targetEntry.inboxDirectory, fileName)
+writeFileSync(temporaryPath, message)
+renameSync(temporaryPath, finalPath)
+console.log(`delivered to claude pid ${targetEntry.claudeProcessId} (${targetEntry.workingDirectory})`)
