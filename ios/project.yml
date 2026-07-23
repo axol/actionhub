@@ -3,6 +3,9 @@ options:
   bundleIdPrefix: li.taurusag
   deploymentTarget:
     iOS: "17.0"
+packages:
+  Sodium:
+    path: vendor/swift-sodium
 targets:
   ActionHub:
     type: application
@@ -11,6 +14,13 @@ targets:
       - Sources
       - path: Sounds
         buildPhase: resources
+    dependencies:
+      - package: Sodium
+        product: Sodium
+    entitlements:
+      path: ActionHub.entitlements
+      properties:
+        com.apple.developer.usernotifications.time-sensitive: true
     info:
       path: Info.plist
       properties:
@@ -18,9 +28,24 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes:
           - audio
+          - fetch
+        BGTaskSchedulerPermittedIdentifiers:
+          - li.taurusag.actionhub.refresh
         NSMicrophoneUsageDescription: Streams your voice to the transcription service while dictating.
+        NSFaceIDUsageDescription: Unlocks your signing key to read questions and sign verdicts.
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: li.taurusag.actionhub
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
+  ActionHubTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests
+    dependencies:
+      - target: ActionHub
+    settings:
+      base:
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: YES
