@@ -5,7 +5,7 @@ Voice-first, screen-optional control of Claude Code sessions. A mac daemon, pair
 ## Structure
 
 - `mac/` — Mac daemon (voice engine, session registry, transcript observer, routing)
-- `relay/` — Cloudflare Worker + Durable Object, blind message relay (`relay.babelbase.com`)
+- `relay/` — Cloudflare Worker + Durable Object, blind message relay (`actionhub.app`)
 - `ios/` — iPhone: on-device STT/TTS, media buttons, earcons; usable walking, in the car, anywhere
 - `android/` — Daylight DC1 viewer (read-only sessions, YubiKey-gated actions)
 - `channels/` — Claude Code MCP channels (voice, grunt)
@@ -56,7 +56,7 @@ requires a fresh YubiKey fingerprint assertion verified by the daemon.
 ## Relay deployment
 
 `relay/` is the canonical worker source and is deployed as `actionhub-relay` at
-`relay.babelbase.com`. Redeploy with `npx wrangler deploy`; the token lives in the
+`actionhub.app`. Redeploy with `npx wrangler deploy`; the token lives in the
 `RELAY_TOKEN` worker secret.
 
 ## Migration notes

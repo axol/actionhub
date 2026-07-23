@@ -6,7 +6,7 @@ import sys
 
 import websockets
 
-RELAY_URL = f"wss://relay.babelbase.com/?role=phone&room=actionhub&token={os.environ['DICTATE_RELAY_TOKEN']}"
+RELAY_URL = f"wss://actionhub.app/?role=phone&room=actionhub&token={os.environ['DICTATE_RELAY_TOKEN']}"
 
 
 async def send_presence(connection):

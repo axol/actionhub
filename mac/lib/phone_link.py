@@ -65,7 +65,7 @@ async def consume_phone_events(voice_activity_state, playback_state, recording_s
     if not relay_token:
         print("[relay disabled, DICTATE_RELAY_TOKEN not set]", file=sys.stderr)
         return
-    relay_url = f"wss://relay.babelbase.com/?role=mac&room=actionhub&token={relay_token}"
+    relay_url = f"wss://actionhub.app/?role=mac&room=actionhub&token={relay_token}"
     while True:
         try:
             async with websockets.connect(relay_url) as phone_connection:
